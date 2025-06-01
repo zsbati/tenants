@@ -103,7 +103,28 @@ class MainWindow(QMainWindow):
             tenant_data = dialog.get_tenant_data()
             if tenant_data:
                 try:
-                    if self.db_manager.add_tenant(tenant_data):
+                    # Create Tenant object from data
+                    tenant = Tenant(
+                        name=tenant_data['name'],
+                        room=tenant_data['room'],
+                        bi=tenant_data['bi'],
+                        email=tenant_data['email'],
+                        phone=tenant_data['phone'],
+                        address=tenant_data['address'],
+                        birth_date=tenant_data['birth_date'],
+                        entry_date=tenant_data['entry_date']
+                    )
+                    
+                    # Add emergency contact if provided
+                    if tenant_data['emergency_contact']['name']:
+                        tenant.emergency_contact = EmergencyContact(
+                            name=tenant_data['emergency_contact']['name'],
+                            phone=tenant_data['emergency_contact']['phone'],
+                            email=tenant_data['emergency_contact']['email']
+                        )
+                    
+                    # Add tenant to database
+                    if self.db_manager.add_tenant(tenant):
                         self.load_tenants()
                         QMessageBox.information(self, "Sucesso", "Inquilino adicionado com sucesso!")
                     else:

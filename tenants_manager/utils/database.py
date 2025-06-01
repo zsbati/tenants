@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
-from ..models.tenant import Base
+from ..models.tenant import Base, Tenant, EmergencyContact
 import os
 
 # Add project root to Python path
@@ -32,7 +32,8 @@ class DatabaseManager:
         """Get all tenants from the database"""
         with self.Session() as session:
             try:
-                return session.query(Tenant).all()
+                tenants = session.query(Tenant).all()
+                return tenants
             except Exception as e:
                 print(f"Error getting tenants: {str(e)}")
                 return []
