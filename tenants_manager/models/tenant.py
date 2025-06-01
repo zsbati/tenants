@@ -21,6 +21,7 @@ class Tenant(Base):
     
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)
+    room = Column(String(50), nullable=False)  # Room identification (e.g., JB22, 2º andar, 10)
     bi = Column(String(20), unique=True, nullable=False)  # Changed from CPF to BI
     email = Column(String(100), nullable=True)
     phone = Column(String(20), nullable=True)

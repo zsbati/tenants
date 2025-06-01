@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import (QMainWindow, QTabWidget, QPushButton, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QMessageBox, QHBoxLayout, QStatusBar, QTableView)
+from PyQt6.QtWidgets import (QMainWindow, QTabWidget, QPushButton, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QMessageBox, QHBoxLayout, QStatusBar, QTableView, QDialog)
 from PyQt6.QtCore import Qt
 from tenants_manager.views.tenant_dialog import TenantDialog
 from tenants_manager.models.tenant import Tenant
@@ -66,8 +66,11 @@ class MainWindow(QMainWindow):
         
         layout.addLayout(button_layout)
         
-        # Table view for tenants
-        self.tenant_table = QTableView()
+        # Create tenant table
+        self.tenant_table = QTableWidget()
+        self.tenant_table.setColumnCount(7)  # Added room column
+        self.tenant_table.setHorizontalHeaderLabels(["Nome", "Quarto", "BI", "Email", "Telefone", "Endereço", "Data de Nascimento"])
+        
         layout.addWidget(self.tenant_table)
         
         return widget
@@ -106,7 +109,10 @@ class MainWindow(QMainWindow):
                     else:
                         QMessageBox.critical(self, "Erro", "Erro ao adicionar inquilino")
                 except Exception as e:
-                    QMessageBox.critical(self, "Erro", f"Erro ao adicionar inquilino: {str(e)}")
+                    if 'UNIQUE constraint failed: tenants.bi' in str(e):
+                        QMessageBox.critical(self, "Erro", "Este BI já está sendo usado por outro inquilino. Por favor, use um BI diferente.")
+                    else:
+                        QMessageBox.critical(self, "Erro", f"Erro ao adicionar inquilino: {str(e)}")
     
     def edit_tenant(self):
         # TODO: Implement edit functionality
@@ -117,5 +123,29 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Em Desenvolvimento", "Funcionalidade de exclusão em desenvolvimento")
     
     def load_tenants(self):
-        # TODO: Implement table model loading
-        pass
+        """Load tenants from database and display them in the table"""
+        try:
+            tenants = self.db_manager.get_tenants()
+            
+            # Clear existing rows
+            self.tenant_table.setRowCount(0)
+            
+            # Add rows for each tenant
+            for tenant in tenants:
+                row = self.tenant_table.rowCount()
+                self.tenant_table.insertRow(row)
+                
+                # Add tenant data to each column
+                self.tenant_table.setItem(row, 0, QTableWidgetItem(tenant.name))
+                self.tenant_table.setItem(row, 1, QTableWidgetItem(tenant.room))
+                self.tenant_table.setItem(row, 2, QTableWidgetItem(tenant.bi))
+                self.tenant_table.setItem(row, 3, QTableWidgetItem(tenant.email or ""))
+                self.tenant_table.setItem(row, 4, QTableWidgetItem(tenant.phone or ""))
+                self.tenant_table.setItem(row, 5, QTableWidgetItem(tenant.address or ""))
+                self.tenant_table.setItem(row, 6, QTableWidgetItem(tenant.birth_date.strftime("%d/%m/%Y")))
+                
+            # Resize columns to fit content
+            self.tenant_table.resizeColumnsToContents()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Erro ao carregar lista de inquilinos: {str(e)}")

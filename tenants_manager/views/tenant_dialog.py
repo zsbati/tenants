@@ -15,13 +15,28 @@ class TenantDialog(QDialog):
         # Main layout
         layout = QVBoxLayout()
         
+        # Name and Room
+        name_room_layout = QHBoxLayout()
+        
+        # Name
+        name_label = QLabel("Nome:")
+        self.name_input = QLineEdit()
+        name_layout = QHBoxLayout()
+        name_layout.addWidget(name_label)
+        name_layout.addWidget(self.name_input)
+        
+        # Room
+        room_label = QLabel("Quarto:")
+        self.room_input = QLineEdit()
+        room_layout = QHBoxLayout()
+        room_layout.addWidget(room_label)
+        room_layout.addWidget(self.room_input)
+        
+        name_room_layout.addLayout(name_layout)
+        name_room_layout.addLayout(room_layout)
+
         # Form layout
         form_layout = QFormLayout()
-
-        # Name (mandatory)
-        self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("Obrigatório")
-        form_layout.addRow("Nome:", self.name_input)
 
         # BI (mandatory)
         self.bi_input = QLineEdit()
@@ -74,6 +89,9 @@ class TenantDialog(QDialog):
         emergency_group.setLayout(emergency_layout)
         layout.addWidget(emergency_group)
 
+        # Add name and room layout to main layout
+        layout.addLayout(name_room_layout)
+
         # Add form layout to main layout
         layout.addLayout(form_layout)
 
@@ -94,6 +112,7 @@ class TenantDialog(QDialog):
         # If editing existing tenant, populate fields
         if self.tenant:
             self.name_input.setText(self.tenant.name)
+            self.room_input.setText(self.tenant.room)
             self.bi_input.setText(self.tenant.bi)
             self.email_input.setText(self.tenant.email)
             self.phone_input.setText(self.tenant.phone)
@@ -114,6 +133,9 @@ class TenantDialog(QDialog):
         if not self.name_input.text().strip():
             QMessageBox.warning(self, "Erro", "O nome é obrigatório!")
             return None
+        if not self.room_input.text().strip():
+            QMessageBox.warning(self, "Erro", "O quarto é obrigatório!")
+            return None
         if not self.bi_input.text().strip():
             QMessageBox.warning(self, "Erro", "O BI é obrigatório!")
             return None
@@ -127,6 +149,7 @@ class TenantDialog(QDialog):
         # Create tenant object
         tenant = Tenant()
         tenant.name = self.name_input.text()
+        tenant.room = self.room_input.text()
         tenant.bi = self.bi_input.text()
         tenant.email = self.email_input.text()
         tenant.phone = self.phone_input.text()
