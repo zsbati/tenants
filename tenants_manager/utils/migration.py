@@ -1,33 +1,27 @@
-from .database import DatabaseManager
-from ..models.tenant import Base
+from alembic.config import Config
+from alembic import command
 import os
-import shutil
-import datetime
+import sys
+
+# Add project root to Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 def migrate_database():
-    manager = DatabaseManager()
+    """Run database migrations using Alembic"""
+    # Get database directory
+    db_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
-    # Get database paths
-    db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tenants.db')
-    backup_path = db_path + '.backup'
+    # Create Alembic configuration
+    alembic_cfg = Config()
+    alembic_cfg.set_main_option('script_location', os.path.join(db_dir, 'alembic'))
+    alembic_cfg.set_main_option('sqlalchemy.url', f'sqlite:///{os.path.join(db_dir, "tenants.db")}')
     
-    # Check if database exists
-    if os.path.exists(db_path):
-        try:
-            # Try to create a backup
-            shutil.copy2(db_path, backup_path)
-            print(f"Created backup at {backup_path}")
-            
-            # Remove existing database
-            os.remove(db_path)
-            print("Removed existing database")
-        except Exception as e:
-            print(f"Warning: Could not create backup: {str(e)}")
-            print("Continuing with migration...")
-    
-    # Create new database with updated schema
-    manager.initialize_database()
-    print("Database migrated successfully!")
+    try:
+        # Run migrations
+        command.upgrade(alembic_cfg, "head")
+        print("Database migrated successfully!")
+    except Exception as e:
+        print(f"Error during migration: {str(e)}")
 
 if __name__ == "__main__":
     migrate_database()

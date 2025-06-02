@@ -4,3 +4,4 @@ python-dotenv==1.0.0
 PyQt6-Qt6==6.6.1
 PyQt6-sip==13.6.0
 PyInstaller==6.3.0
+alembic==1.13.1
