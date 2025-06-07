@@ -52,6 +52,11 @@ class TenantDialog(QDialog):
         self.phone_input = QLineEdit()
         self.phone_input.setPlaceholderText("Opcional")
         form_layout.addRow("Telefone:", self.phone_input)
+        
+        # Rent (mandatory)
+        self.rent_input = QLineEdit()
+        self.rent_input.setPlaceholderText("Obrigatório")
+        form_layout.addRow("Renda (€):", self.rent_input)
 
         # Address (optional)
         self.address_input = QLineEdit()
@@ -113,6 +118,7 @@ class TenantDialog(QDialog):
         if self.tenant:
             self.name_input.setText(self.tenant.name)
             self.room_input.setText(self.tenant.room)
+            self.rent_input.setText(str(self.tenant.rent))
             self.bi_input.setText(self.tenant.bi)
             self.email_input.setText(self.tenant.email)
             self.phone_input.setText(self.tenant.phone)
@@ -145,11 +151,22 @@ class TenantDialog(QDialog):
         if not self.entry_input.date().isValid():
             QMessageBox.warning(self, "Erro", "A data de entrada é obrigatória!")
             return None
+            
+        # Validate rent
+        try:
+            rent = float(self.rent_input.text().replace(',', '.'))
+            if rent <= 0:
+                QMessageBox.warning(self, "Erro", "A renda deve ser maior que zero!")
+                return None
+        except ValueError:
+            QMessageBox.warning(self, "Erro", "Por favor, insira um valor numérico válido para a renda!")
+            return None
 
         # Create tenant object
         tenant = Tenant()
         tenant.name = self.name_input.text()
         tenant.room = self.room_input.text()
+        tenant.rent = float(self.rent_input.text().replace(',', '.'))
         tenant.bi = self.bi_input.text()
         tenant.email = self.email_input.text()
         tenant.phone = self.phone_input.text()

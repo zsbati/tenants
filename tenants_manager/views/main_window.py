@@ -26,6 +26,17 @@ class MainWindow(QMainWindow):
         self.session = self.db_manager.get_session()
         self.init_ui()
         self.load_tenants()
+        
+    def closeEvent(self, event):
+        """Handle window close event"""
+        try:
+            # Close database session
+            if self.session is not None:
+                self.session.close()
+            event.accept()
+        except Exception as e:
+            print(f"Error closing window: {str(e)}")
+            event.accept()
     
     def init_ui(self):
         """Initialize the main window UI"""
@@ -68,8 +79,8 @@ class MainWindow(QMainWindow):
         
         # Create tenant table
         self.tenant_table = QTableWidget()
-        self.tenant_table.setColumnCount(7)  # Added room column
-        self.tenant_table.setHorizontalHeaderLabels(["Nome", "Quarto", "BI", "Email", "Telefone", "Endereço", "Data de Nascimento"])
+        self.tenant_table.setColumnCount(8)  # Added room and rent columns
+        self.tenant_table.setHorizontalHeaderLabels(["Nome", "Quarto", "Renda (€)", "BI", "Email", "Telefone", "Endereço", "Data de Nascimento"])
         
         layout.addWidget(self.tenant_table)
         
@@ -100,40 +111,34 @@ class MainWindow(QMainWindow):
     def add_tenant(self):
         dialog = TenantDialog(parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            tenant_data = dialog.get_tenant_data()
-            if tenant_data:
+            tenant = dialog.get_tenant_data()
+            if tenant:
                 try:
-                    # Create Tenant object from data
-                    tenant = Tenant(
-                        name=tenant_data['name'],
-                        room=tenant_data['room'],
-                        bi=tenant_data['bi'],
-                        email=tenant_data['email'],
-                        phone=tenant_data['phone'],
-                        address=tenant_data['address'],
-                        birth_date=tenant_data['birth_date'],
-                        entry_date=tenant_data['entry_date']
-                    )
+                    # Get the session
+                    session = self.db_manager.get_session()
                     
-                    # Add emergency contact if provided
-                    if tenant_data['emergency_contact']['name']:
-                        tenant.emergency_contact = EmergencyContact(
-                            name=tenant_data['emergency_contact']['name'],
-                            phone=tenant_data['emergency_contact']['phone'],
-                            email=tenant_data['emergency_contact']['email']
-                        )
+                    # Add the tenant to the session
+                    session.add(tenant)
                     
-                    # Add tenant to database
-                    if self.db_manager.add_tenant(tenant):
-                        self.load_tenants()
-                        QMessageBox.information(self, "Sucesso", "Inquilino adicionado com sucesso!")
-                    else:
-                        QMessageBox.critical(self, "Erro", "Erro ao adicionar inquilino")
+                    # If there's an emergency contact, add it to the session
+                    if hasattr(tenant, 'emergency_contact') and tenant.emergency_contact:
+                        session.add(tenant.emergency_contact)
+                    
+                    # Commit the transaction
+                    session.commit()
+                    
+                    # Refresh the tenant list
+                    self.load_tenants()
+                    QMessageBox.information(self, "Sucesso", "Inquilino adicionado com sucesso!")
+                    
                 except Exception as e:
+                    session.rollback()
                     if 'UNIQUE constraint failed: tenants.bi' in str(e):
                         QMessageBox.critical(self, "Erro", "Este BI já está sendo usado por outro inquilino. Por favor, use um BI diferente.")
                     else:
                         QMessageBox.critical(self, "Erro", f"Erro ao adicionar inquilino: {str(e)}")
+                finally:
+                    session.close()
     
     def edit_tenant(self):
         # TODO: Implement edit functionality
@@ -159,11 +164,12 @@ class MainWindow(QMainWindow):
                 # Add tenant data to each column
                 self.tenant_table.setItem(row, 0, QTableWidgetItem(tenant.name))
                 self.tenant_table.setItem(row, 1, QTableWidgetItem(tenant.room))
-                self.tenant_table.setItem(row, 2, QTableWidgetItem(tenant.bi))
-                self.tenant_table.setItem(row, 3, QTableWidgetItem(tenant.email or ""))
-                self.tenant_table.setItem(row, 4, QTableWidgetItem(tenant.phone or ""))
-                self.tenant_table.setItem(row, 5, QTableWidgetItem(tenant.address or ""))
-                self.tenant_table.setItem(row, 6, QTableWidgetItem(tenant.birth_date.strftime("%d/%m/%Y")))
+                self.tenant_table.setItem(row, 2, QTableWidgetItem(f"{tenant.rent:.2f}".replace('.', ',')))
+                self.tenant_table.setItem(row, 3, QTableWidgetItem(tenant.bi))
+                self.tenant_table.setItem(row, 4, QTableWidgetItem(tenant.email or ""))
+                self.tenant_table.setItem(row, 5, QTableWidgetItem(tenant.phone or ""))
+                self.tenant_table.setItem(row, 6, QTableWidgetItem(tenant.address or ""))
+                self.tenant_table.setItem(row, 7, QTableWidgetItem(tenant.birth_date.strftime("%d/%m/%Y")))
                 
             # Resize columns to fit content
             self.tenant_table.resizeColumnsToContents()
