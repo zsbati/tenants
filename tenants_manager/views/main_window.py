@@ -82,6 +82,14 @@ class MainWindow(QMainWindow):
         self.tenant_table.setColumnCount(8)  # Added room and rent columns
         self.tenant_table.setHorizontalHeaderLabels(["Nome", "Quarto", "Renda (€)", "BI", "Email", "Telefone", "Endereço", "Data de Nascimento"])
         
+        # Enable single row selection
+        self.tenant_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tenant_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.tenant_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)  # Make table read-only
+        
+        # Stretch columns to fill available space
+        self.tenant_table.horizontalHeader().setStretchLastSection(True)
+        
         layout.addWidget(self.tenant_table)
         
         return widget
@@ -141,12 +149,132 @@ class MainWindow(QMainWindow):
                     session.close()
     
     def edit_tenant(self):
-        # TODO: Implement edit functionality
-        QMessageBox.information(self, "Em Desenvolvimento", "Funcionalidade de edição em desenvolvimento")
+        # Get the selected row
+        selected_rows = self.tenant_table.selectionModel().selectedRows()
+        
+        if not selected_rows:
+            QMessageBox.warning(self, "Aviso", "Por favor, selecione um inquilino para editar.")
+            return
+            
+        # Get the selected row index
+        row = selected_rows[0].row()
+        
+        # Get the tenant's BI (unique identifier) from the table
+        bi = self.tenant_table.item(row, 3).text()
+        
+        session = None
+        try:
+            # Get the session
+            session = self.db_manager.get_session()
+            
+            # Find the tenant by BI
+            tenant = session.query(Tenant).filter_by(bi=bi).first()
+            
+            if not tenant:
+                QMessageBox.critical(self, "Erro", "Inquilino não encontrado!")
+                return
+            
+            # Create and show the edit dialog with the tenant's data
+            dialog = TenantDialog(tenant=tenant, parent=self)
+            
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                # Get the updated tenant data
+                updated_tenant = dialog.get_tenant_data()
+                
+                if updated_tenant:
+                    # Update the tenant's properties
+                    tenant.name = updated_tenant.name
+                    tenant.room = updated_tenant.room
+                    tenant.rent = updated_tenant.rent
+                    tenant.bi = updated_tenant.bi
+                    tenant.email = updated_tenant.email
+                    tenant.phone = updated_tenant.phone
+                    tenant.address = updated_tenant.address
+                    tenant.birth_date = updated_tenant.birth_date
+                    tenant.entry_date = updated_tenant.entry_date
+                    
+                    # Handle emergency contact
+                    if hasattr(updated_tenant, 'emergency_contact') and updated_tenant.emergency_contact:
+                        if hasattr(tenant, 'emergency_contact') and tenant.emergency_contact:
+                            # Update existing emergency contact
+                            ec = tenant.emergency_contact
+                            updated_ec = updated_tenant.emergency_contact
+                            ec.name = updated_ec.name
+                            ec.phone = updated_ec.phone
+                            ec.email = updated_ec.email
+                        else:
+                            # Add new emergency contact
+                            tenant.emergency_contact = updated_tenant.emergency_contact
+                    elif hasattr(tenant, 'emergency_contact') and tenant.emergency_contact:
+                        # Remove existing emergency contact if it exists but was cleared
+                        session.delete(tenant.emergency_contact)
+                    
+                    # Commit the changes
+                    session.commit()
+                    
+                    # Refresh the table
+                    self.load_tenants()
+                    QMessageBox.information(self, "Sucesso", "Inquilino atualizado com sucesso!")
+            
+        except Exception as e:
+            if session:
+                session.rollback()
+            QMessageBox.critical(self, "Erro", f"Erro ao atualizar inquilino: {str(e)}")
+        finally:
+            if session:
+                session.close()
     
     def delete_tenant(self):
-        # TODO: Implement delete functionality
-        QMessageBox.information(self, "Em Desenvolvimento", "Funcionalidade de exclusão em desenvolvimento")
+        # Get the selected row
+        selected_rows = self.tenant_table.selectionModel().selectedRows()
+        
+        if not selected_rows:
+            QMessageBox.warning(self, "Aviso", "Por favor, selecione um inquilino para excluir.")
+            return
+            
+        # Get the selected row index
+        row = selected_rows[0].row()
+        
+        # Get the tenant's BI (unique identifier) from the table
+        bi = self.tenant_table.item(row, 3).text()
+        
+        # Ask for confirmation
+        reply = QMessageBox.question(
+            self, 
+            'Confirmar Exclusão',
+            f'Tem certeza que deseja excluir o inquilino {self.tenant_table.item(row, 0).text()}?\nBI: {bi}',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            session = None
+            try:
+                # Get the session
+                session = self.db_manager.get_session()
+                
+                # Find the tenant by BI
+                tenant = session.query(Tenant).filter_by(bi=bi).first()
+                
+                if not tenant:
+                    QMessageBox.critical(self, "Erro", "Inquilino não encontrado!")
+                    return
+                
+                # Delete the tenant (this will cascade to emergency_contact due to the relationship)
+                session.delete(tenant)
+                session.commit()
+                
+                # Refresh the table
+                self.load_tenants()
+                QMessageBox.information(self, "Sucesso", "Inquilino excluído com sucesso!")
+                
+            except Exception as e:
+                if session:
+                    session.rollback()
+                QMessageBox.critical(self, "Erro", f"Erro ao excluir inquilino: {str(e)}")
+            finally:
+                if session:
+                    session.close()
     
     def load_tenants(self):
         """Load tenants from database and display them in the table"""
