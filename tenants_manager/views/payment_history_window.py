@@ -1,12 +1,13 @@
 from PyQt6 import QtWidgets
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, 
                              QPushButton, QHBoxLayout, QLabel, QMessageBox, QHeaderView,
-                             QDateEdit)
+                             QDateEdit, QLineEdit)
 from PyQt6.QtCore import Qt, QDate
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QColor
 from datetime import datetime, date
 from tenants_manager.utils.database import DatabaseManager
-from tenants_manager.models.tenant import PaymentType, PaymentStatus
+from tenants_manager.models.tenant import Payment, PaymentType, PaymentStatus, Tenant
+from tenants_manager.views.payment_dialog import PaymentDialog
 
 class PaymentHistoryWindow(QDialog):
     def __init__(self, tenant_id, parent=None):
@@ -49,9 +50,24 @@ class PaymentHistoryWindow(QDialog):
         date_layout.addStretch()
         
         # Add payment button
-        add_payment_btn = QPushButton("Registrar Pagamento")
-        add_payment_btn.clicked.connect(self.add_payment)
-        date_layout.addWidget(add_payment_btn)
+        self.add_payment_btn = QPushButton("Registrar Pagamento")
+        self.add_payment_btn.clicked.connect(self.register_payment)
+        date_layout.addWidget(self.add_payment_btn)
+        
+        # Set button style
+        self.add_payment_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                font-weight: bold;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
         
         # Payments table
         self.payments_table = QTableWidget()
@@ -84,64 +100,130 @@ class PaymentHistoryWindow(QDialog):
         layout.addLayout(button_box)
     
     def load_payments(self):
-        self.payments_table.setRowCount(0)
-        
+        """Load payments for the selected date range"""
         start_date = self.start_date.date().toPyDate()
         end_date = self.end_date.date().toPyDate()
         
-        payments = self.db.get_tenant_payments(
-            self.tenant_id, 
-            start_date=start_date,
-            end_date=end_date
-        )
+        # Clear existing rows
+        self.payments_table.setRowCount(0)
         
-        for payment in payments:
-            row = self.payments_table.rowCount()
-            self.payments_table.insertRow(row)
+        # Get payments from database
+        with self.db.Session() as session:
+            # First, get all payments to show full history
+            all_payments = session.query(Payment).filter(
+                Payment.tenant_id == self.tenant_id
+            ).order_by(Payment.payment_date.desc()).all()
             
-            self.payments_table.setItem(row, 0, QTableWidgetItem(payment.payment_date.strftime("%d/%m/%Y %H:%M")))
-            self.payments_table.setItem(row, 1, QTableWidgetItem(payment.payment_type.value.upper()))
-            self.payments_table.setItem(row, 2, QTableWidgetItem(
-                payment.reference_month.strftime("%m/%Y") if payment.reference_month else ""
-            ))
-            self.payments_table.setItem(row, 3, QTableWidgetItem(f"{payment.amount:.2f} €"))
-            self.payments_table.setItem(row, 4, QTableWidgetItem(payment.status.value.upper()))
-            self.payments_table.setItem(row, 5, QTableWidgetItem(payment.description or ""))
+            # Then filter by date range if needed
+            payments = [
+                p for p in all_payments 
+                if start_date <= p.payment_date.date() <= end_date
+            ]
             
-            # Color code the row based on payment status
-            if payment.status == PaymentStatus.COMPLETED:
-                color = "#e8f5e9"  # Light green
-            elif payment.status == PaymentStatus.PENDING:
-                color = "#fff8e1"  # Light yellow
-            elif payment.status == PaymentStatus.CANCELLED:
-                color = "#ffebee"  # Light red
-            else:
-                color = "#f5f5f5"  # Light gray
+            # If no payments in date range but there are payments, show all
+            if not payments and all_payments:
+                payments = all_payments
+                # Update date range to show all payments
+                if all_payments:
+                    dates = [p.payment_date.date() for p in all_payments]
+                    self.start_date.setDate(min(dates))
+                    self.end_date.setDate(max(dates))
+            
+            for row, payment in enumerate(payments):
+                self.payments_table.insertRow(row)
                 
-            for col in range(self.payments_table.columnCount()):
-                item = self.payments_table.item(row, col)
-                if item:
-                    item.setBackground(color)
+                # Date
+                payment_date = payment.payment_date.date() if hasattr(payment.payment_date, 'date') else payment.payment_date
+                date_item = QTableWidgetItem(payment_date.strftime("%d/%m/%Y"))
+                date_item.setData(Qt.ItemDataRole.UserRole, payment.id)
+                self.payments_table.setItem(row, 0, date_item)
+                
+                # Reference Month
+                ref_date = payment.reference_month.date() if hasattr(payment.reference_month, 'date') else payment.reference_month
+                ref_month = ref_date.strftime("%B %Y").capitalize()
+                self.payments_table.setItem(row, 1, QTableWidgetItem(ref_month))
+                
+                # Amount
+                self.payments_table.setItem(row, 2, QTableWidgetItem(f"{payment.amount:.2f} €"))
+                
+                # Type
+                self.payments_table.setItem(row, 3, QTableWidgetItem(payment.payment_type.value.capitalize()))
+                
+                # Status
+                status_item = QTableWidgetItem(payment.status.value.capitalize())
+                
+                # Set status color
+                if payment.status == PaymentStatus.COMPLETED:
+                    color = Qt.GlobalColor.darkGreen
+                elif payment.status == PaymentStatus.PENDING:
+                    color = Qt.GlobalColor.darkYellow
+                else:
+                    color = Qt.GlobalColor.darkRed
+                    
+                status_item.setForeground(color)
+                self.payments_table.setItem(row, 4, status_item)
+                
+                # Description
+                self.payments_table.setItem(row, 5, QTableWidgetItem(payment.description or ""))
+                
+                # Auto-resize columns to fit content
+                self.payments_table.resizeColumnsToContents()
+                
+                # Make the table take full width
+                header = self.payments_table.horizontalHeader()
+                for i in range(header.count()):
+                    if i != 5:  # Don't stretch the description column
+                        header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+                header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)  # Stretch description
     
     def update_balance(self):
-        balance = self.db.get_tenant_balance(self.tenant_id)
-        if balance > 0:
-            self.balance_label.setText(f"<span style='color: #d32f2f;'>Dívida: {balance:.2f} €</span>")
-        elif balance < 0:
-            self.balance_label.setText(f"<span style='color: #388e3c;'>Crédito: {abs(balance):.2f} €</span>")
-        else:
-            self.balance_label.setText("<span style='color: #388e3c;'>Conta em dia</span>")
+        """Update the balance label"""
+        with self.db.Session() as session:
+            tenant = session.query(Tenant).get(self.tenant_id)
+            if tenant:
+                balance = tenant.get_balance()
+                color = "red" if balance > 0 else "green"
+                self.balance_label.setText(f"Saldo: <span style='color:{color}'>{balance:.2f} €</span>")
+                self.balance_label.setTextFormat(Qt.TextFormat.RichText)
     
-    def add_payment(self):
-        # This would open a dialog to add a new payment
-        # For now, we'll just show a message
-        QMessageBox.information(
-            self,
-            "Em Desenvolvimento",
-            "Funcionalidade de registro de pagamento será implementada em breve."
-        )
-        # In a real implementation, you would open a dialog to enter payment details
-        # and then call db.record_payment() with the entered values
+    def register_payment(self):
+        """Open dialog to register a new payment"""
+        with self.db.Session() as session:
+            tenant = session.query(Tenant).get(self.tenant_id)
+            if not tenant:
+                QMessageBox.warning(self, "Erro", "Inquilino não encontrado!")
+                return
+                
+            payment_data = PaymentDialog.get_payment(tenant.name, self.db, self)
+            if payment_data:
+                try:
+                    # Add tenant_id to payment data
+                    payment_data['tenant_id'] = self.tenant_id
+                    
+                    # Record the payment
+                    payment = self.db.record_payment(**payment_data)
+                    
+                    if payment:
+                        QMessageBox.information(
+                            self, 
+                            "Sucesso", 
+                            f"Pagamento de {payment_data['amount']} € registado com sucesso!"
+                        )
+                        # Refresh the view
+                        self.load_payments()
+                        self.update_balance()
+                        # Notify parent to refresh payments tab if needed
+                        if self.parent():
+                            self.parent().load_payments()
+                    else:
+                        QMessageBox.critical(self, "Erro", "Falha ao registrar o pagamento!")
+                        
+                except Exception as e:
+                    QMessageBox.critical(
+                        self, 
+                        "Erro", 
+                        f"Ocorreu um erro ao registrar o pagamento:\n{str(e)}"
+                    )
 
 
 class QDateEdit(QtWidgets.QDateEdit):
