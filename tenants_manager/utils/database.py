@@ -89,6 +89,22 @@ class DatabaseManager:
                 )
                 
             return query.order_by(Payment.payment_date.desc()).all()
+            
+    def get_total_rent_collected(self, reference_month=None):
+        """Get total rent collected for a specific month"""
+        if reference_month is None:
+            reference_month = datetime.utcnow()
+            
+        with self.Session() as session:
+            total = session.query(
+                func.sum(Payment.amount)
+            ).filter(
+                Payment.payment_type == PaymentType.RENT,
+                Payment.status == PaymentStatus.COMPLETED,
+                func.strftime('%Y-%m', Payment.reference_month) == reference_month.strftime('%Y-%m')
+            ).scalar()
+            
+            return total or 0.0
     
     def get_rent_history(self, tenant_id, start_date=None, end_date=None):
         """Get rent history for a tenant within a date range"""

@@ -1,26 +1,26 @@
 from PyQt6.QtWidgets import (QMainWindow, QTabWidget, QPushButton, QVBoxLayout, QWidget, 
                              QTableWidget, QTableWidgetItem, QMessageBox, QHBoxLayout, 
                              QStatusBar, QTableView, QDialog, QLabel, QMenu, QAbstractItemView,
-                             QHeaderView, QDateEdit)
-from PyQt6.QtCore import Qt, QDate
+                             QHeaderView, QDateEdit, QFrame)
+from PyQt6.QtCore import Qt, QDate, QLocale
 from PyQt6.QtGui import QAction
+import locale
+import sys
+import os
+
+# Set Portuguese locale for date formatting
+locale.setlocale(locale.LC_TIME, 'pt_PT.UTF-8')  # For Linux/Unix
+# locale.setlocale(locale.LC_TIME, 'Portuguese_Portugal.1252')  # For Windows
+
+# Add project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
 from tenants_manager.views.tenant_dialog import TenantDialog
 from tenants_manager.views.payment_history_window import PaymentHistoryWindow
 from tenants_manager.models.tenant import Tenant, PaymentType, PaymentStatus
 from tenants_manager.utils.database import DatabaseManager
-import sys
-import os
-
-# Add project root to Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from tenants_manager.views.tenant_dialog import TenantDialog
-from tenants_manager.models.tenant import Tenant
-from tenants_manager.utils.database import DatabaseManager
-import sys
-import os
-
-# Add project root to Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -61,6 +61,12 @@ class MainWindow(QMainWindow):
         # Status bar
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
+        
+        # Add separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(separator)
 
     def create_tenants_tab(self):
         widget = QWidget()
@@ -137,6 +143,12 @@ class MainWindow(QMainWindow):
         button_layout.addLayout(date_layout)
         
         layout.addLayout(button_layout)
+        
+        # Add total rent collected label
+        self.total_rent_label = QLabel()
+        self.total_rent_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.total_rent_label.setStyleSheet("font-weight: bold; font-size: 14px; padding: 5px;")
+        layout.addWidget(self.total_rent_label)
         
         # Create payments table
         self.payments_table = QTableWidget()
@@ -406,6 +418,14 @@ class MainWindow(QMainWindow):
         # Get the reference month
         ref_date = self.reference_month.date().toPyDate()
         
+        # Update total rent collected
+        total_rent = self.db_manager.get_total_rent_collected(ref_date)
+        # Format date in Portuguese
+        month_year = ref_date.strftime('%B %Y').lower()
+        # Capitalize the first letter of the month
+        month_year = month_year[0].upper() + month_year[1:]
+        self.total_rent_label.setText(f"Total Arrecadado em {month_year}: {total_rent:.2f} €")
+        
         # Get all tenants
         tenants = self.db_manager.get_tenants()
         
@@ -467,7 +487,7 @@ class MainWindow(QMainWindow):
         row = selected_rows[0].row()
         tenant_id = self.payments_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
         
-        dialog = PaymentHistoryWindow(tenant_id, self)
+        dialog = PaymentHistoryWindow(tenant_id, parent_widget=self)
         dialog.exec()
 
     def show_tenant_context_menu(self, position):
@@ -484,5 +504,5 @@ class MainWindow(QMainWindow):
         
         action = menu.exec(self.tenant_table.viewport().mapToGlobal(position))
         if action == payment_action:
-            dialog = PaymentHistoryWindow(tenant_id, self)
+            dialog = PaymentHistoryWindow(tenant_id, parent_widget=self)
             dialog.exec()

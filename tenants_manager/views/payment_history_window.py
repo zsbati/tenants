@@ -10,9 +10,9 @@ from tenants_manager.models.tenant import Payment, PaymentType, PaymentStatus, T
 from tenants_manager.views.payment_dialog import PaymentDialog
 
 class PaymentHistoryWindow(QDialog):
-    def __init__(self, tenant_id, parent=None):
-        super().__init__(parent)
-        self.parent = parent
+    def __init__(self, tenant_id, parent_widget=None):
+        super().__init__(parent_widget)
+        self.parent_widget = parent_widget
         self.tenant_id = tenant_id
         self.db = DatabaseManager()
         self.setWindowTitle("Histórico de Pagamentos")
@@ -337,8 +337,8 @@ class PaymentHistoryWindow(QDialog):
                         self.load_payments()
                         self.update_balance()
                         # Notify parent to refresh payments tab if needed
-                        if self.parent():
-                            self.parent().load_payments()
+                        if self.parent_widget:
+                            self.parent_widget.load_payments()
                     else:
                         QMessageBox.critical(self, "Erro", "Falha ao registrar o pagamento!")
                         
