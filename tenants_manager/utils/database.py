@@ -135,6 +135,20 @@ class DatabaseManager:
                 
             return tenant.get_balance(as_of_date)
     
+    def get_total_debt(self, as_of_date=None):
+        """Calculate the total debt across all tenants (sum of positive balances)"""
+        if as_of_date is None:
+            as_of_date = datetime.utcnow()
+            
+        total_debt = 0.0
+        with self.Session() as session:
+            tenants = session.query(Tenant).all()
+            for tenant in tenants:
+                balance = tenant.get_balance(as_of_date)
+                if balance > 0:  # Only count positive balances (debts)
+                    total_debt += balance
+        return total_debt
+    
     def generate_rent_statement(self, tenant_id, start_date, end_date=None):
         """Generate a rent statement for a tenant"""
         if end_date is None:

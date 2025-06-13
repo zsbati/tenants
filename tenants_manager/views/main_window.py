@@ -144,11 +144,36 @@ class MainWindow(QMainWindow):
         
         layout.addLayout(button_layout)
         
-        # Add total rent collected label
-        self.total_rent_label = QLabel()
-        self.total_rent_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        # Add total rent collected and total debt labels
+        totals_layout = QHBoxLayout()
+        
+        # Left side: Total rent collected
+        rent_container = QWidget()
+        rent_layout = QHBoxLayout(rent_container)
+        rent_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.total_rent_label = QLabel("Total Arrecadado: 0.00 €")
         self.total_rent_label.setStyleSheet("font-weight: bold; font-size: 14px; padding: 5px;")
-        layout.addWidget(self.total_rent_label)
+        rent_layout.addWidget(self.total_rent_label)
+        totals_layout.addWidget(rent_container)
+        
+        # Add stretch to push the next label to the right
+        totals_layout.addStretch()
+        
+        # Right side: Total debt
+        debt_container = QWidget()
+        debt_layout = QHBoxLayout(debt_container)
+        debt_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.total_debt_label = QLabel("Dívida Total: 0.00 €")
+        self.total_debt_label.setStyleSheet(
+            "font-weight: bold; font-size: 14px; padding: 5px; "
+            "color: red;"  # Red color for debt to make it stand out
+        )
+        debt_layout.addWidget(self.total_debt_label)
+        totals_layout.addWidget(debt_container)
+        
+        layout.addLayout(totals_layout)
         
         # Create payments table
         self.payments_table = QTableWidget()
@@ -419,12 +444,19 @@ class MainWindow(QMainWindow):
         ref_date = self.reference_month.date().toPyDate()
         
         # Update total rent collected
-        total_rent = self.db_manager.get_total_rent_collected(ref_date)
+        total_rent = self.db_manager.get_total_rent_collected(ref_date) or 0.0
+        
         # Format date in Portuguese
         month_year = ref_date.strftime('%B %Y').lower()
         # Capitalize the first letter of the month
         month_year = month_year[0].upper() + month_year[1:]
+        
+        # Update the total rent label with the formatted amount
         self.total_rent_label.setText(f"Total Arrecadado em {month_year}: {total_rent:.2f} €")
+        
+        # Calculate and display total debt
+        total_debt = self.db_manager.get_total_debt(ref_date) or 0.0
+        self.total_debt_label.setText(f"Dívida Total: {total_debt:.2f} €")
         
         # Get all tenants
         tenants = self.db_manager.get_tenants()
