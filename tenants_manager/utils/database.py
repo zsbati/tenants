@@ -29,15 +29,66 @@ class DatabaseManager:
                 print(f"Error adding tenant: {str(e)}")
                 return False
 
-    def get_tenants(self):
-        """Get all tenants from the database"""
+    def get_tenants(self, page=1, per_page=20, search_term=None):
+        """Get paginated list of tenants from the database
+        
+        Args:
+            page (int): Page number (1-based)
+            per_page (int): Number of items per page
+            search_term (str, optional): Optional search term to filter tenants by name
+            
+        Returns:
+            tuple: (list_of_tenants, total_count)
+        """
+        print(f"\n=== get_tenants(page={page}, per_page={per_page}, search_term='{search_term}') ===")
+        
         with self.Session() as session:
             try:
-                tenants = session.query(Tenant).all()
-                return tenants
+                print("Creating base query...")
+                query = session.query(Tenant)
+                print(f"Base query created. Query: {query}")
+                
+                # Apply search filter if provided
+                if search_term and search_term.strip():
+                    print(f"Applying search filter for: {search_term}")
+                    search = f"%{search_term}%"
+                    query = query.filter(Tenant.name.ilike(search))
+                
+                # Get total count for pagination
+                print("Counting total tenants...")
+                total = query.count()
+                print(f"Total tenants: {total}")
+                
+                # Apply pagination and order by name for consistent results
+                offset = (page - 1) * per_page
+                print(f"Fetching tenants (offset={offset}, limit={per_page})...")
+                tenants = query.order_by(Tenant.name).offset(offset).limit(per_page).all()
+                print(f"Retrieved {len(tenants)} tenant(s)")
+                
+                # Debug: Print all tenants
+                print("\nTenants retrieved:")
+                for i, tenant in enumerate(tenants, 1):
+                    print(f"  {i}. ID: {getattr(tenant, 'id', 'N/A')}, Name: {getattr(tenant, 'name', 'N/A')}, Type: {type(tenant)}")
+                
+                # Log any invalid tenant objects for debugging
+                invalid_tenants = [t for t in tenants if not hasattr(t, 'id')]
+                if invalid_tenants:
+                    print(f"\nWarning: Found {len(invalid_tenants)} invalid tenant objects:")
+                    for i, t in enumerate(invalid_tenants, 1):
+                        print(f"  {i}. Type: {type(t)}, Content: {t}")
+                
+                # Filter out invalid tenants
+                valid_tenants = [t for t in tenants if hasattr(t, 'id')]
+                print(f"\nReturning {len(valid_tenants)} valid tenant(s)")
+                
+                return valid_tenants, total
+                
             except Exception as e:
-                print(f"Error getting tenants: {str(e)}")
-                return []
+                print(f"\n!!! ERROR in get_tenants: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                print("Returning empty list due to error")
+                return [], 0
     
     def get_session(self):
         return self.Session()
@@ -125,15 +176,35 @@ class DatabaseManager:
     
     def get_tenant_balance(self, tenant_id, as_of_date=None):
         """Get the current balance (rent due - payments) for a tenant"""
-        if as_of_date is None:
-            as_of_date = datetime.utcnow()
-            
-        with self.Session() as session:
-            tenant = session.query(Tenant).get(tenant_id)
-            if not tenant:
-                return 0.0
+        try:
+            if as_of_date is None:
+                as_of_date = datetime.utcnow()
                 
-            return tenant.get_balance(as_of_date)
+            print(f"Getting balance for tenant_id: {tenant_id}, type: {type(tenant_id)}")
+            
+            with self.Session() as session:
+                # Ensure tenant_id is an integer
+                try:
+                    if isinstance(tenant_id, (list, tuple)) and len(tenant_id) > 0:
+                        tenant_id = tenant_id[0]  # Take first item if it's a list
+                    tenant_id = int(tenant_id)  # Ensure it's an integer
+                except (ValueError, TypeError) as e:
+                    print(f"Error converting tenant_id to int: {e}, type: {type(tenant_id)}")
+                    return 0.0
+                
+                tenant = session.query(Tenant).get(tenant_id)
+                if not tenant:
+                    print(f"No tenant found with id: {tenant_id}")
+                    return 0.0
+                
+                print(f"Found tenant: ID={tenant.id}, Name={getattr(tenant, 'name', 'N/A')}")
+                return tenant.get_balance(as_of_date)
+                
+        except Exception as e:
+            print(f"Error in get_tenant_balance: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return 0.0
     
     def get_total_debt(self, as_of_date=None):
         """Calculate the total debt across all tenants (sum of positive balances)"""

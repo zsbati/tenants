@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (QMainWindow, QTabWidget, QPushButton, QVBoxLayout, QWidget, 
                              QTableWidget, QTableWidgetItem, QMessageBox, QHBoxLayout, 
                              QStatusBar, QTableView, QDialog, QLabel, QMenu, QAbstractItemView,
-                             QHeaderView, QDateEdit, QFrame)
+                             QHeaderView, QDateEdit, QFrame, QLineEdit)
 from PyQt6.QtCore import Qt, QDate, QLocale
 from PyQt6.QtGui import QAction
 import locale
@@ -24,13 +24,36 @@ from tenants_manager.utils.database import DatabaseManager
 
 class MainWindow(QMainWindow):
     def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Gestor de Inquilinos")
-        self.setMinimumSize(1024, 768)
-        self.db_manager = DatabaseManager()
-        self.session = self.db_manager.get_session()
-        self.init_ui()
-        self.load_tenants()
+        try:
+            super().__init__()
+            print("Initializing MainWindow...")
+            self.setWindowTitle("Gestor de Inquilinos")
+            self.setMinimumSize(1024, 768)
+            
+            print("Creating DatabaseManager...")
+            self.db_manager = DatabaseManager()
+            print("Getting database session...")
+            self.session = self.db_manager.get_session()
+            
+            # Pagination variables
+            self.current_page = 1
+            self.rows_per_page = 20
+            self.total_tenants = 0
+            self.search_term = ""
+            
+            print("Initializing UI...")
+            self.init_ui()
+            print("Loading tenants...")
+            self.load_tenants()
+            print("Application started successfully!")
+            
+        except Exception as e:
+            print(f"Error during initialization: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(None, "Erro de Inicialização", 
+                               f"Ocorreu um erro ao iniciar o aplicativo:\n\n{str(e)}\n\nVerifique o log para mais detalhes.")
+            raise  # Re-raise the exception to see the full traceback
         
     def closeEvent(self, event):
         """Handle window close event"""
@@ -72,7 +95,20 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
-        # Button layout
+        # Top button layout
+        top_controls = QHBoxLayout()
+        
+        # Search bar
+        search_layout = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Pesquisar inquilino...")
+        self.search_input.returnPressed.connect(self.on_search)
+        search_btn = QPushButton("Pesquisar")
+        search_btn.clicked.connect(self.on_search)
+        search_layout.addWidget(self.search_input)
+        search_layout.addWidget(search_btn)
+        
+        # Action buttons
         button_layout = QHBoxLayout()
         add_tenant_btn = QPushButton("Novo Inquilino")
         edit_tenant_btn = QPushButton("Editar Inquilino")
@@ -82,17 +118,40 @@ class MainWindow(QMainWindow):
         button_layout.addWidget(edit_tenant_btn)
         button_layout.addWidget(delete_tenant_btn)
         
+        # Add to top controls
+        top_controls.addLayout(search_layout, 1)
+        top_controls.addLayout(button_layout, 2)
+        
+        layout.addLayout(top_controls)
+        
         # Connect buttons
         add_tenant_btn.clicked.connect(self.add_tenant)
         edit_tenant_btn.clicked.connect(self.edit_tenant)
         delete_tenant_btn.clicked.connect(self.delete_tenant)
         
-        layout.addLayout(button_layout)
-        
         # Create tenant table
         self.tenant_table = QTableWidget()
-        self.tenant_table.setColumnCount(8)  # Added room and rent columns
+        self.tenant_table.setColumnCount(8)
         self.tenant_table.setHorizontalHeaderLabels(["Nome", "Quarto", "Renda (€)", "BI", "Email", "Telefone", "Endereço", "Data de Nascimento"])
+        
+        # Pagination controls
+        pagination_layout = QHBoxLayout()
+        
+        self.prev_btn = QPushButton("Anterior")
+        self.next_btn = QPushButton("Próximo")
+        self.page_label = QLabel("Página 1")
+        self.rows_label = QLabel("")
+        
+        self.prev_btn.clicked.connect(self.prev_page)
+        self.next_btn.clicked.connect(self.next_page)
+        
+        pagination_layout.addWidget(self.prev_btn)
+        pagination_layout.addWidget(self.page_label)
+        pagination_layout.addWidget(self.next_btn)
+        pagination_layout.addStretch()
+        pagination_layout.addWidget(self.rows_label)
+        
+        layout.addLayout(pagination_layout)
         
         # Enable single row selection
         self.tenant_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -394,20 +453,58 @@ class MainWindow(QMainWindow):
                     session.close()
     
     def load_tenants(self):
-        """Load tenants from database and display them in the table"""
+        """Load tenants from database with pagination and display them in the table"""
         try:
-            tenants = self.db_manager.get_tenants()
+            # Get paginated tenants
+            tenants, total = self.db_manager.get_tenants(
+                page=self.current_page,
+                per_page=self.rows_per_page,
+                search_term=self.search_term
+            )
+            
+            self.total_tenants = total
+            total_pages = (total + self.rows_per_page - 1) // self.rows_per_page if total > 0 else 1
+            
+            # Update pagination controls
+            self.prev_btn.setEnabled(self.current_page > 1)
+            self.next_btn.setEnabled(self.current_page < total_pages)
+            self.page_label.setText(f"Página {self.current_page} de {max(1, total_pages)}")
+            
+            start_item = (self.current_page - 1) * self.rows_per_page + 1
+            end_item = min(start_item + len(tenants) - 1, total) if total > 0 else 0
+            self.rows_label.setText(f"Mostrando {start_item}-{end_item} de {total} inquilinos")
             
             # Clear existing rows
             self.tenant_table.setRowCount(0)
             
+            # Debug: Print info about the tenants we received
+            print(f"\n--- Loading {len(tenants)} tenants (page {self.current_page}, {self.rows_per_page} per page) ---")
+            
             # Add rows for each tenant
-            for tenant in tenants:
+            for i, tenant in enumerate(tenants, 1):
+                print(f"Tenant {i}: Type={type(tenant)}, ID={getattr(tenant, 'id', 'N/A')}, Name={getattr(tenant, 'name', 'N/A')}")
+                
+                if not hasattr(tenant, 'id'):
+                    print(f"Warning: Tenant object has no 'id' attribute: {tenant}")
+                    continue
+                    
                 row = self.tenant_table.rowCount()
                 self.tenant_table.insertRow(row)
                 
-                # Calculate current balance
-                balance = self.db_manager.get_tenant_balance(tenant.id)
+                try:
+                    # Ensure we're passing a valid tenant ID
+                    tenant_id = getattr(tenant, 'id', None)
+                    if tenant_id is None:
+                        print(f"Warning: Tenant object has no 'id' attribute: {tenant}")
+                        balance = 0.0
+                    else:
+                        print(f"Getting balance for tenant ID: {tenant_id}")
+                        balance = self.db_manager.get_tenant_balance(tenant_id)
+                except Exception as e:
+                    print(f"Error getting balance for tenant {getattr(tenant, 'id', 'N/A')}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    balance = 0.0
                 
                 # Add tenant data to each column
                 self.tenant_table.setItem(row, 0, QTableWidgetItem(tenant.name))
@@ -435,6 +532,25 @@ class MainWindow(QMainWindow):
             
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Erro ao carregar lista de inquilinos: {str(e)}")
+    
+    def on_search(self):
+        """Handle search action"""
+        self.current_page = 1
+        self.search_term = self.search_input.text().strip()
+        self.load_tenants()
+    
+    def prev_page(self):
+        """Go to previous page"""
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.load_tenants()
+    
+    def next_page(self):
+        """Go to next page"""
+        total_pages = (self.total_tenants + self.rows_per_page - 1) // self.rows_per_page
+        if self.current_page < total_pages:
+            self.current_page += 1
+            self.load_tenants()
 
     def load_payments(self):
         """Load payment overview for all tenants"""
@@ -458,10 +574,13 @@ class MainWindow(QMainWindow):
         total_debt = self.db_manager.get_total_debt(ref_date) or 0.0
         self.total_debt_label.setText(f"Dívida Total: {total_debt:.2f} €")
         
-        # Get all tenants
-        tenants = self.db_manager.get_tenants()
+        # Get all tenants - now returns (tenants, total_count)
+        tenants, _ = self.db_manager.get_tenants()
         
         for tenant in tenants:
+            if not hasattr(tenant, 'id'):
+                print(f"Warning: Invalid tenant object in load_payments: {tenant}")
+                continue
             # Get payment status for the reference month
             payments = self.db_manager.get_tenant_payments(
                 tenant.id,
