@@ -173,34 +173,51 @@ class PaymentHistoryWindow(QDialog):
     def get_payments_query(self):
         """Get the base query with filters applied"""
         with self.db.Session() as session:
-            query = session.query(Payment).filter(
-                Payment.tenant_id == self.tenant_id,
-                Payment.payment_date >= self.start_date.date().toPyDate(),
-                Payment.payment_date <= self.end_date.date().toPyDate()
-            )
+            query = session.query(Payment).filter(Payment.tenant_id == self.tenant_id)
             
-            search_text = self.search_input.text().strip().lower()
+            # Apply date range filter
+            start_date = self.start_date.date().toPyDate()
+            end_date = self.end_date.date().toPyDate()
+            
+            # Convert to datetime at start/end of day for proper date range filtering
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            
+            query = query.filter(Payment.payment_date.between(start_datetime, end_datetime))
+            
+            # Apply search filter
+            search_text = self.search_input.text().strip()
             if search_text:
-                query = query.filter(Payment.description.ilike(f"%{search_text}%"))
-                
+                query = query.filter(
+                    or_(
+                        Payment.description.ilike(f'%{search_text}%'),
+                        Payment.payment_type.ilike(f'%{search_text}%'),
+                        Payment.reference_month.ilike(f'%{search_text}%')
+                    )
+                )
+            
             return query.order_by(Payment.payment_date.desc())
     
     def load_payments(self):
         """Load payments for the selected page and filters"""
-        # Clear existing rows
-        self.payments_table.setRowCount(0)
-        
         try:
+            # Clear the table first and disable sorting to prevent issues
+            self.payments_table.setSortingEnabled(False)
+            self.payments_table.setRowCount(0)
+            
             with self.db.Session() as session:
-                # Get paginated results
+                # Get the base query
                 query = self.get_payments_query()
                 
                 # Apply pagination
                 offset = (self.current_page - 1) * self.items_per_page
                 payments = query.offset(offset).limit(self.items_per_page).all()
                 
+                # Set row count in one go for better performance
+                self.payments_table.setRowCount(len(payments))
+                
                 for row, payment in enumerate(payments):
-                    self.payments_table.insertRow(row)
+                    # Create items for each cell in the row
                     
                     # Date
                     payment_date = payment.payment_date.date() if hasattr(payment.payment_date, 'date') else payment.payment_date
