@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, DateTime, Float, ForeignKey, Enum, func
+from sqlalchemy import Boolean, Column, Integer, String, Date, DateTime, Float, ForeignKey, Enum, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -75,12 +75,29 @@ class Tenant(Base):
     entry_date = Column(Date, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_active = Column(Boolean, default=True, nullable=False, server_default='1')
+    deleted_at = Column(DateTime, nullable=True)
 
     # Relationships
     contracts = relationship("Contract", back_populates="tenant")
     emergency_contact = relationship("EmergencyContact", back_populates="tenant", uselist=False)
     payments = relationship("Payment", back_populates="tenant", order_by="Payment.payment_date.desc()")
     rent_history = relationship("RentHistory", back_populates="tenant", order_by="RentHistory.valid_from.desc()")
+    
+    def soft_delete(self):
+        """Mark the tenant as deleted by setting is_active to False and deleted_at to current time"""
+        self.is_active = False
+        self.deleted_at = datetime.utcnow()
+        
+    def restore(self):
+        """Restore a soft-deleted tenant by setting is_active to True and clearing deleted_at"""
+        self.is_active = True
+        self.deleted_at = None
+        
+    @classmethod
+    def query_active(cls, session):
+        """Return a query that filters out soft-deleted tenants"""
+        return session.query(cls).filter_by(is_active=True)
     
     def update_rent(self, new_amount, changed_by=None, session=None):
         """Update the rent amount and create a historical record"""

@@ -4,9 +4,10 @@ from tenants_manager.models.tenant import Tenant, EmergencyContact
 from tenants_manager.utils.database import DatabaseManager
 
 class TenantDialog(QDialog):
-    def __init__(self, tenant=None, parent=None):
+    def __init__(self, tenant=None, parent=None, is_deleted=False):
         super().__init__(parent)
         self.tenant = tenant
+        self.is_deleted = is_deleted
         self.init_ui()
 
     def init_ui(self):
@@ -14,6 +15,18 @@ class TenantDialog(QDialog):
 
         # Main layout
         layout = QVBoxLayout()
+        
+        # Show deletion status if viewing a deleted tenant
+        if self.is_deleted:
+            deleted_label = QLabel("<span style='color: red; font-weight: bold;'>ESTE INQUILINO ESTÁ MARCADO COMO REMOVIDO</span>")
+            deleted_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(deleted_label)
+            
+            # Add a separator
+            separator = QFrame()
+            separator.setFrameShape(QFrame.Shape.HLine)
+            separator.setFrameShadow(QFrame.Shadow.Sunken)
+            layout.addWidget(separator)
         
         # Name and Room
         name_room_layout = QHBoxLayout()
@@ -99,6 +112,10 @@ class TenantDialog(QDialog):
 
         # Add form layout to main layout
         layout.addLayout(form_layout)
+        
+        # Disable all inputs if viewing a deleted tenant
+        if self.is_deleted:
+            self.set_read_only(True)
 
         # Add buttons
         button_box = QHBoxLayout()

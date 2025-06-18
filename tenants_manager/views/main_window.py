@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (QMainWindow, QTabWidget, QPushButton, QVBoxLayout, QWidget, 
                              QTableWidget, QTableWidgetItem, QMessageBox, QHBoxLayout, 
                              QStatusBar, QTableView, QDialog, QLabel, QMenu, QAbstractItemView,
-                             QHeaderView, QDateEdit, QFrame, QLineEdit)
+                             QHeaderView, QDateEdit, QFrame, QLineEdit, QCheckBox)
 from PyQt6.QtCore import Qt, QDate, QLocale
 from PyQt6.QtGui import QAction
 import locale
@@ -97,6 +97,14 @@ class MainWindow(QMainWindow):
         
         # Top button layout
         top_controls = QHBoxLayout()
+        
+        # Add Show Deleted checkbox
+        self.show_deleted_checkbox = QCheckBox("Mostrar Inquilinos Removidos")
+        self.show_deleted_checkbox.stateChanged.connect(self.toggle_deleted_tenants)
+        top_controls.addWidget(self.show_deleted_checkbox)
+        
+        # Add spacer to push buttons to the right
+        top_controls.addStretch()
         
         # Search bar
         search_layout = QHBoxLayout()
@@ -349,7 +357,7 @@ class MainWindow(QMainWindow):
                 return
             
             # Create and show the edit dialog with the tenant's data
-            dialog = TenantDialog(tenant=tenant, parent=self)
+            dialog = TenantDialog(tenant=tenant, parent=self, is_deleted=not tenant.is_active)
             
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 # Get the updated tenant data
@@ -400,66 +408,66 @@ class MainWindow(QMainWindow):
                 session.close()
     
     def delete_tenant(self):
-        # Get the selected row
-        selected_rows = self.tenant_table.selectionModel().selectedRows()
-        
-        if not selected_rows:
-            QMessageBox.warning(self, "Aviso", "Por favor, selecione um inquilino para excluir.")
-            return
+        """Soft delete the selected tenant"""
+        current_row = self.tenant_table.currentRow()
+        if current_row >= 0:
+            tenant_id = self.tenant_table.item(current_row, 0).data(Qt.ItemDataRole.UserRole)
             
-        # Get the selected row index
-        row = selected_rows[0].row()
-        
-        # Get the tenant's BI (unique identifier) from the table
-        bi = self.tenant_table.item(row, 3).text()
-        
-        # Ask for confirmation
-        reply = QMessageBox.question(
-            self, 
-            'Confirmar Exclusão',
-            f'Tem certeza que deseja excluir o inquilino {self.tenant_table.item(row, 0).text()}?\nBI: {bi}',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            session = None
-            try:
-                # Get the session
-                session = self.db_manager.get_session()
-                
-                # Find the tenant by BI
-                tenant = session.query(Tenant).filter_by(bi=bi).first()
-                
-                if not tenant:
-                    QMessageBox.critical(self, "Erro", "Inquilino não encontrado!")
-                    return
-                
-                # Delete the tenant (this will cascade to emergency_contact due to the relationship)
-                session.delete(tenant)
-                session.commit()
-                
-                # Refresh the table
-                self.load_tenants()
-                self.load_payments()
-                QMessageBox.information(self, "Sucesso", "Inquilino excluído com sucesso!")
-                
-            except Exception as e:
-                if session:
-                    session.rollback()
-                QMessageBox.critical(self, "Erro", f"Erro ao excluir inquilino: {str(e)}")
-            finally:
-                if session:
-                    session.close()
+            reply = QMessageBox.question(
+                self, 'Confirmar',
+                'Tem a certeza que deseja marcar este inquilino como removido?\n\n' +
+                'O inquilino não será eliminado permanentemente e poderá ser restaurado posteriormente.',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                if self.db_manager.delete_tenant(tenant_id, hard_delete=False):
+                    self.load_tenants()
+                    QMessageBox.information(
+                        self, 'Sucesso', 
+                        'Inquilino marcado como removido com sucesso!\n\n' +
+                        'Use a opção "Mostrar Inquilinos Removidos" para visualizá-lo.'
+                    )
+                else:
+                    QMessageBox.warning(self, 'Erro', 'Não foi possível remover o inquilino.')
+                    
+    def restore_tenant(self):
+        """Restore a soft-deleted tenant"""
+        current_row = self.tenant_table.currentRow()
+        if current_row >= 0:
+            tenant_id = self.tenant_table.item(current_row, 0).data(Qt.ItemDataRole.UserRole)
+            
+            reply = QMessageBox.question(
+                self, 'Confirmar',
+                'Tem a certeza que deseja restaurar este inquilino?',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                if self.db_manager.restore_tenant(tenant_id):
+                    self.load_tenants()
+                    QMessageBox.information(self, 'Sucesso', 'Inquilino restaurado com sucesso!')
+                else:
+                    QMessageBox.warning(self, 'Erro', 'Não foi possível restaurar o inquilino.')
+                    
+    def toggle_deleted_tenants(self, state):
+        """Toggle visibility of deleted tenants"""
+        self.load_tenants()
     
     def load_tenants(self):
-        """Load tenants from database with pagination and display them in the table"""
+        """Load tenants from the database"""
         try:
+            self.tenant_table.setRowCount(0)
+            
             # Get paginated tenants
+            show_deleted = hasattr(self, 'show_deleted_checkbox') and self.show_deleted_checkbox.isChecked()
             tenants, total = self.db_manager.get_tenants(
                 page=self.current_page,
                 per_page=self.rows_per_page,
-                search_term=self.search_term
+                search_term=self.search_term,
+                include_inactive=show_deleted
             )
             
             self.total_tenants = total
@@ -507,8 +515,21 @@ class MainWindow(QMainWindow):
                     balance = 0.0
                 
                 # Add tenant data to each column
-                self.tenant_table.setItem(row, 0, QTableWidgetItem(tenant.name))
-                self.tenant_table.setItem(row, 1, QTableWidgetItem(tenant.room))
+                name_item = QTableWidgetItem(tenant.name)
+                room_item = QTableWidgetItem(tenant.room)
+                
+                # Style deleted tenants with strikethrough and red color
+                is_deleted = not getattr(tenant, 'is_active', True)
+                if is_deleted:
+                    font = name_item.font()
+                    font.setStrikeOut(True)
+                    name_item.setFont(font)
+                    room_item.setFont(font)
+                    name_item.setForeground(Qt.GlobalColor.red)
+                    room_item.setForeground(Qt.GlobalColor.red)
+                
+                self.tenant_table.setItem(row, 0, name_item)
+                self.tenant_table.setItem(row, 1, room_item)
                 
                 # Format rent with balance information
                 rent_item = QTableWidgetItem(f"{tenant.rent:.2f} €")

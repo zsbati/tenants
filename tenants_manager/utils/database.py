@@ -29,23 +29,27 @@ class DatabaseManager:
                 print(f"Error adding tenant: {str(e)}")
                 return False
 
-    def get_tenants(self, page=1, per_page=20, search_term=None):
+    def get_tenants(self, page=1, per_page=20, search_term=None, include_inactive=False):
         """Get paginated list of tenants from the database
         
         Args:
             page (int): Page number (1-based)
             per_page (int): Number of items per page
             search_term (str, optional): Optional search term to filter tenants by name
+            include_inactive (bool, optional): If True, includes soft-deleted tenants
             
         Returns:
             tuple: (list_of_tenants, total_count)
         """
-        print(f"\n=== get_tenants(page={page}, per_page={per_page}, search_term='{search_term}') ===")
+        print(f"\n=== get_tenants(page={page}, per_page={per_page}, search_term='{search_term}', include_inactive={include_inactive}) ===")
         
         with self.Session() as session:
             try:
                 print("Creating base query...")
-                query = session.query(Tenant)
+                if include_inactive:
+                    query = session.query(Tenant)
+                else:
+                    query = Tenant.query_active(session)
                 print(f"Base query created. Query: {query}")
                 
                 # Apply search filter if provided
