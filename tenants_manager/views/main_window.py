@@ -603,9 +603,11 @@ class MainWindow(QMainWindow):
                 print(f"Warning: Invalid tenant object in load_payments: {tenant}")
                 continue
             # Get payment status for the reference month
-            payments = self.db_manager.get_tenant_payments(
-                tenant.id,
-                reference_month=ref_date
+            payments, _ = self.db_manager.get_tenant_payments(
+                tenant_id=tenant.id,
+                reference_month=ref_date,
+                page=1,  # Get all payments for the month
+                per_page=1000  # Arbitrarily large number to get all payments
             )
             
             # Calculate total paid for the reference month

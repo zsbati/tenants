@@ -128,22 +128,61 @@ class DatabaseManager:
                 print(f"Error recording payment: {str(e)}")
                 return None
     
-    def get_tenant_payments(self, tenant_id, start_date=None, end_date=None, reference_month=None):
-        """Get all payments for a tenant within a date range or for a specific reference month"""
+    def get_tenant_payments(self, tenant_id, start_date=None, end_date=None, reference_month=None, 
+                       page=1, per_page=20, search_term=None):
+        """Get paginated payments for a tenant with optional filters
+        
+        Args:
+            tenant_id (int): ID of the tenant
+            start_date (date, optional): Filter payments after this date
+            end_date (date, optional): Filter payments before this date
+            reference_month (date, optional): Filter payments for a specific month
+            page (int): Page number (1-based)
+            per_page (int): Number of items per page
+            search_term (str, optional): Optional search term to filter payments by description
+            
+        Returns:
+            tuple: (list_of_payments, total_count)
+        """
         with self.Session() as session:
+            # Base query
             query = session.query(Payment).filter(Payment.tenant_id == tenant_id)
             
+            # Apply date filters
             if start_date:
                 query = query.filter(Payment.payment_date >= start_date)
             if end_date:
-                query = query.filter(Payment.payment_date <= end_date)
+                # Include the entire end date
+                end_of_day = datetime.combine(end_date, datetime.max.time())
+                query = query.filter(Payment.payment_date <= end_of_day)
             if reference_month:
                 # If reference_month is provided, filter payments for that specific month
                 query = query.filter(
                     func.strftime('%Y-%m', Payment.reference_month) == reference_month.strftime('%Y-%m')
                 )
-                
-            return query.order_by(Payment.payment_date.desc()).all()
+            
+            # Apply search term if provided
+            if search_term and search_term.strip():
+                search = f"%{search_term.strip()}%"
+                query = query.filter(
+                    or_(
+                        Payment.description.ilike(search),
+                        Payment.payment_type.ilike(search),
+                        Payment.status.ilike(search)
+                    )
+                )
+            
+            # Get total count
+            total = query.count()
+            
+            # Apply pagination
+            offset = (page - 1) * per_page
+            payments = query.order_by(Payment.payment_date.desc())\
+                         .offset(offset)\
+                         .limit(per_page)\
+                         .all()
+            
+            return payments, total
             
     def get_total_rent_collected(self, reference_month=None):
         """Get total rent collected for a specific month"""

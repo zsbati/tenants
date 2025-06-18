@@ -155,48 +155,38 @@ class PaymentHistoryWindow(QDialog):
     
     def load_payments_count(self):
         """Load total count of payments for current filters"""
-        with self.db.Session() as session:
-            query = session.query(Payment).filter(
-                Payment.tenant_id == self.tenant_id,
-                Payment.payment_date >= self.start_date.date().toPyDate(),
-                Payment.payment_date <= self.end_date.date().toPyDate()
-            )
-            
-            search_text = self.search_input.text().strip().lower()
-            if search_text:
-                query = query.filter(Payment.description.ilike(f"%{search_text}%"))
-                
-            self.total_payments = query.count()
-            self.total_label.setText(f"Total: {self.total_payments}")
-            self.update_pagination_controls()
+        search_text = self.search_input.text().strip()
+        start_date = self.start_date.date().toPyDate()
+        end_date = self.end_date.date().toPyDate()
+        
+        # This will update self.total_payments
+        payments, self.total_payments = self.db.get_tenant_payments(
+            tenant_id=self.tenant_id,
+            start_date=start_date,
+            end_date=end_date,
+            page=1,  # Just get the first page for now
+            per_page=self.items_per_page,
+            search_term=search_text
+        )
+        
+        self.total_label.setText(f"Total: {self.total_payments}")
+        self.update_pagination_controls()
     
     def get_payments_query(self):
-        """Get the base query with filters applied"""
-        with self.db.Session() as session:
-            query = session.query(Payment).filter(Payment.tenant_id == self.tenant_id)
-            
-            # Apply date range filter
-            start_date = self.start_date.date().toPyDate()
-            end_date = self.end_date.date().toPyDate()
-            
-            # Convert to datetime at start/end of day for proper date range filtering
-            start_datetime = datetime.combine(start_date, datetime.min.time())
-            end_datetime = datetime.combine(end_date, datetime.max.time())
-            
-            query = query.filter(Payment.payment_date.between(start_datetime, end_datetime))
-            
-            # Apply search filter
-            search_text = self.search_input.text().strip()
-            if search_text:
-                query = query.filter(
-                    or_(
-                        Payment.description.ilike(f'%{search_text}%'),
-                        Payment.payment_type.ilike(f'%{search_text}%'),
-                        Payment.reference_month.ilike(f'%{search_text}%')
-                    )
-                )
-            
-            return query.order_by(Payment.payment_date.desc())
+        """Get payments with filters applied"""
+        search_text = self.search_input.text().strip()
+        start_date = self.start_date.date().toPyDate()
+        end_date = self.end_date.date().toPyDate()
+        
+        payments, total = self.db.get_tenant_payments(
+            tenant_id=self.tenant_id,
+            start_date=start_date,
+            end_date=end_date,
+            page=self.current_page,
+            per_page=self.items_per_page,
+            search_term=search_text
+        )
+        return payments
     
     def load_payments(self):
         """Load payments for the selected page and filters"""
@@ -205,53 +195,48 @@ class PaymentHistoryWindow(QDialog):
             self.payments_table.setSortingEnabled(False)
             self.payments_table.setRowCount(0)
             
-            with self.db.Session() as session:
-                # Get the base query
-                query = self.get_payments_query()
+            # Get the payments for the current page
+            payments = self.get_payments_query()
+            
+            # Set row count in one go for better performance
+            self.payments_table.setRowCount(len(payments))
+            
+            for row, payment in enumerate(payments):
+                # Create items for each cell in the row
                 
-                # Apply pagination
-                offset = (self.current_page - 1) * self.items_per_page
-                payments = query.offset(offset).limit(self.items_per_page).all()
+                # Date
+                payment_date = payment.payment_date.date() if hasattr(payment.payment_date, 'date') else payment.payment_date
+                date_item = QTableWidgetItem(payment_date.strftime("%d/%m/%Y"))
+                date_item.setData(Qt.ItemDataRole.UserRole, payment.id)
+                self.payments_table.setItem(row, 0, date_item)
                 
-                # Set row count in one go for better performance
-                self.payments_table.setRowCount(len(payments))
+                # Reference Month
+                ref_date = payment.reference_month.date() if hasattr(payment.reference_month, 'date') else payment.reference_month
+                ref_month = ref_date.strftime("%B %Y").capitalize()
+                self.payments_table.setItem(row, 1, QTableWidgetItem(ref_month))
                 
-                for row, payment in enumerate(payments):
-                    # Create items for each cell in the row
+                # Amount
+                self.payments_table.setItem(row, 2, QTableWidgetItem(f"{payment.amount:.2f} €"))
+                
+                # Type
+                self.payments_table.setItem(row, 3, QTableWidgetItem(payment.payment_type.value.capitalize()))
+                
+                # Status
+                status_item = QTableWidgetItem(payment.status.value.capitalize())
+                
+                # Set status color
+                if payment.status == PaymentStatus.COMPLETED:
+                    color = Qt.GlobalColor.darkGreen
+                elif payment.status == PaymentStatus.PENDING:
+                    color = Qt.GlobalColor.darkYellow
+                else:
+                    color = Qt.GlobalColor.darkRed
                     
-                    # Date
-                    payment_date = payment.payment_date.date() if hasattr(payment.payment_date, 'date') else payment.payment_date
-                    date_item = QTableWidgetItem(payment_date.strftime("%d/%m/%Y"))
-                    date_item.setData(Qt.ItemDataRole.UserRole, payment.id)
-                    self.payments_table.setItem(row, 0, date_item)
-                    
-                    # Reference Month
-                    ref_date = payment.reference_month.date() if hasattr(payment.reference_month, 'date') else payment.reference_month
-                    ref_month = ref_date.strftime("%B %Y").capitalize()
-                    self.payments_table.setItem(row, 1, QTableWidgetItem(ref_month))
-                    
-                    # Amount
-                    self.payments_table.setItem(row, 2, QTableWidgetItem(f"{payment.amount:.2f} €"))
-                    
-                    # Type
-                    self.payments_table.setItem(row, 3, QTableWidgetItem(payment.payment_type.value.capitalize()))
-                    
-                    # Status
-                    status_item = QTableWidgetItem(payment.status.value.capitalize())
-                    
-                    # Set status color
-                    if payment.status == PaymentStatus.COMPLETED:
-                        color = Qt.GlobalColor.darkGreen
-                    elif payment.status == PaymentStatus.PENDING:
-                        color = Qt.GlobalColor.darkYellow
-                    else:
-                        color = Qt.GlobalColor.darkRed
-                        
-                    status_item.setForeground(color)
-                    self.payments_table.setItem(row, 4, status_item)
-                    
-                    # Description
-                    self.payments_table.setItem(row, 5, QTableWidgetItem(payment.description or ""))
+                status_item.setForeground(color)
+                self.payments_table.setItem(row, 4, status_item)
+                
+                # Description
+                self.payments_table.setItem(row, 5, QTableWidgetItem(payment.description or ""))
                 
                 # Auto-resize columns to fit content
                 self.payments_table.resizeColumnsToContents()
