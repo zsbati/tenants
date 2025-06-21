@@ -46,14 +46,22 @@ class PaymentHistoryWindow(QDialog):
         date_layout.addWidget(QLabel("De:"))
         self.start_date = QDateEdit()
         self.start_date.setCalendarPopup(True)
-        self.start_date.setDate(QDate.currentDate().addMonths(-3))
+        # Set default start date to 5 years ago or tenant's entry date, whichever is earlier
+        five_years_ago = QDate.currentDate().addYears(-5)
+        tenant_entry_date = self.get_tenant_entry_date()
+        if tenant_entry_date and tenant_entry_date < five_years_ago.toPyDate():
+            self.start_date.setDate(QDate(tenant_entry_date.year, tenant_entry_date.month, 1))
+        else:
+            self.start_date.setDate(five_years_ago)
         self.start_date.dateChanged.connect(self.on_date_changed)
         date_layout.addWidget(self.start_date)
         
         date_layout.addWidget(QLabel("Até:"))
         self.end_date = QDateEdit()
         self.end_date.setCalendarPopup(True)
-        self.end_date.setDate(QDate.currentDate())
+        # Set default end date to end of current month
+        today = QDate.currentDate()
+        self.end_date.setDate(QDate(today.year(), today.month(), today.daysInMonth()))
         self.end_date.dateChanged.connect(self.on_date_changed)
         date_layout.addWidget(self.end_date)
         
@@ -205,52 +213,89 @@ class PaymentHistoryWindow(QDialog):
                 # Create items for each cell in the row
                 
                 # Date
-                payment_date = payment.payment_date.date() if hasattr(payment.payment_date, 'date') else payment.payment_date
-                date_item = QTableWidgetItem(payment_date.strftime("%d/%m/%Y"))
-                date_item.setData(Qt.ItemDataRole.UserRole, payment.id)
-                self.payments_table.setItem(row, 0, date_item)
-                
-                # Reference Month
-                ref_date = payment.reference_month.date() if hasattr(payment.reference_month, 'date') else payment.reference_month
-                ref_month = ref_date.strftime("%B %Y").capitalize()
-                self.payments_table.setItem(row, 1, QTableWidgetItem(ref_month))
-                
-                # Amount
-                self.payments_table.setItem(row, 2, QTableWidgetItem(f"{payment.amount:.2f} €"))
+                date_str = payment.payment_date.strftime("%d/%m/%Y") if hasattr(payment, 'payment_date') and payment.payment_date else ""
+                date_item = QTableWidgetItem(date_str)
                 
                 # Type
-                self.payments_table.setItem(row, 3, QTableWidgetItem(payment.payment_type.value.capitalize()))
+                type_str = str(payment.payment_type.value) if hasattr(payment, 'payment_type') and payment.payment_type else ""
+                type_item = QTableWidgetItem(type_str)
+                
+                # Reference month
+                ref_month = ""
+                if hasattr(payment, 'reference_month') and payment.reference_month:
+                    ref_month = payment.reference_month.strftime("%m/%Y")
+                ref_item = QTableWidgetItem(ref_month)
+                
+                # Amount
+                amount = getattr(payment, 'amount', 0)
+                amount_item = QTableWidgetItem(f"{amount:.2f} €")
                 
                 # Status
-                status_item = QTableWidgetItem(payment.status.value.capitalize())
-                
-                # Set status color
-                if payment.status == PaymentStatus.COMPLETED:
-                    color = Qt.GlobalColor.darkGreen
-                elif payment.status == PaymentStatus.PENDING:
-                    color = Qt.GlobalColor.darkYellow
+                status = getattr(payment, 'status', '')
+                if isinstance(status, str):
+                    status_str = status
+                elif hasattr(status, 'value'):
+                    status_str = status.value
                 else:
-                    color = Qt.GlobalColor.darkRed
-                    
-                status_item.setForeground(color)
-                self.payments_table.setItem(row, 4, status_item)
+                    status_str = str(status) if status is not None else ""
+                status_item = QTableWidgetItem(status_str)
                 
                 # Description
-                self.payments_table.setItem(row, 5, QTableWidgetItem(payment.description or ""))
+                description = getattr(payment, 'description', '')
+                desc_item = QTableWidgetItem(description or "")
                 
-                # Auto-resize columns to fit content
-                self.payments_table.resizeColumnsToContents()
+                # Add items to the table
+                self.payments_table.setItem(row, 0, date_item)
+                self.payments_table.setItem(row, 1, type_item)
+                self.payments_table.setItem(row, 2, ref_item)
+                self.payments_table.setItem(row, 3, amount_item)
+                self.payments_table.setItem(row, 4, status_item)
+                self.payments_table.setItem(row, 5, desc_item)
                 
-                # Make the table take full width
-                header = self.payments_table.horizontalHeader()
-                for i in range(header.count()):
-                    if i != 5:  # Don't stretch the description column
-                        header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
-                header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)  # Stretch description
+                # Store the payment ID in the row for reference
+                if hasattr(payment, 'id') and payment.id:
+                    date_item.setData(Qt.ItemDataRole.UserRole, payment.id)
                 
-                # Update pagination controls
-                self.update_pagination_controls()
+                # Color code the row based on payment status
+                if hasattr(payment, 'is_expected') and payment.is_expected:
+                    color = QColor(230, 230, 230)  # Light gray for expected
+                    # Make the text italic for expected payments
+                    for col in range(self.payments_table.columnCount()):
+                        item = self.payments_table.item(row, col)
+                        if item:
+                            font = item.font()
+                            font.setItalic(True)
+                            item.setFont(font)
+                elif status == PaymentStatus.PENDING:
+                    color = QColor(255, 255, 200)  # Light yellow for pending
+                elif status == PaymentStatus.CANCELLED:
+                    color = QColor(255, 200, 200)  # Light red for cancelled
+                elif status == PaymentStatus.REFUNDED:
+                    color = QColor(200, 255, 200)  # Light green for refunded
+                else:
+                    color = QColor(255, 255, 255)  # White for completed
                 
+                for col in range(self.payments_table.columnCount()):
+                    item = self.payments_table.item(row, col)
+                    if item:
+                        item.setBackground(color)
+            
+            # Enable sorting after populating the table
+            self.payments_table.setSortingEnabled(True)
+            
+            # Resize columns to fit content
+            self.payments_table.resizeColumnsToContents()
+            
+            # Make the description column take remaining space
+            header = self.payments_table.horizontalHeader()
+            for i in range(header.count()):
+                if i != 5:  # Don't stretch the description column
+                    header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)  # Stretch description
+            
+            # Update pagination controls
+            self.update_pagination_controls()
+            
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Erro ao carregar pagamentos: {str(e)}")
     
@@ -291,6 +336,16 @@ class PaymentHistoryWindow(QDialog):
         self.load_payments_count()
         self.load_payments()
     
+    def get_tenant_entry_date(self):
+        """Get the tenant's entry date from the database"""
+        with self.db.Session() as session:
+            tenant = session.get(Tenant, self.tenant_id)
+            if tenant and tenant.entry_date:
+                if hasattr(tenant.entry_date, 'date'):
+                    return tenant.entry_date.date()
+                return tenant.entry_date
+            return None
+            
     def load_tenant_data(self):
         """Load tenant data and update the balance"""
         with self.db.Session() as session:

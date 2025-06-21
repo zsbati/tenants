@@ -129,7 +129,7 @@ class DatabaseManager:
                 return None
     
     def get_tenant_payments(self, tenant_id, start_date=None, end_date=None, reference_month=None, 
-                       page=1, per_page=20, search_term=None):
+                       page=1, per_page=20, search_term=None, include_expected=True):
         """Get paginated payments for a tenant with optional filters
         
         Args:
@@ -140,6 +140,7 @@ class DatabaseManager:
             page (int): Page number (1-based)
             per_page (int): Number of items per page
             search_term (str, optional): Optional search term to filter payments by description
+            include_expected (bool): Whether to include expected rent entries for months without payments
             
         Returns:
             tuple: (list_of_payments, total_count)
@@ -172,18 +173,121 @@ class DatabaseManager:
                     )
                 )
             
-            # Get total count
-            total = query.count()
+            # Get actual payments
+            payments = query.order_by(Payment.payment_date.desc()).all()
+            
+            # If we should include expected rent entries
+            if include_expected and (start_date and end_date) and not reference_month:
+                # Get expected rent entries for the date range
+                expected_entries = self.get_expected_rent_entries(tenant_id, start_date, end_date)
+                
+                # Convert actual payments to dict format for easier comparison
+                actual_payments_dict = {}
+                for payment in payments:
+                    if payment.reference_month:
+                        month_key = payment.reference_month.strftime('%Y-%m')
+                        actual_payments_dict[month_key] = payment
+                
+                # Add expected entries for months without actual payments
+                for entry in expected_entries:
+                    month_key = entry['reference_month'].strftime('%Y-%m')
+                    if month_key not in actual_payments_dict:
+                        # Create a Payment-like object for the expected entry
+                        payment = type('Payment', (), entry)
+                        payments.append(payment)
             
             # Apply pagination
+            total = len(payments)
             offset = (page - 1) * per_page
-            payments = query.order_by(Payment.payment_date.desc())\
-                         .offset(offset)\
-                         .limit(per_page)\
-                         .all()
+            paginated_payments = payments[offset:offset + per_page]
             
-            return payments, total
+            return paginated_payments, total
             
+    def get_expected_rent_entries(self, tenant_id, start_date, end_date):
+        """Generate expected rent entries for a tenant between two dates"""
+        with self.Session() as session:
+            # Get the tenant's rent history
+            tenant = session.query(Tenant).get(tenant_id)
+            if not tenant:
+                return []
+                
+            # Get all rent history records in chronological order
+            history = sorted(tenant.rent_history, key=lambda x: x.valid_from)
+            
+            # If no rent history, use current rent
+            if not history:
+                entry_date = tenant.entry_date.date() if hasattr(tenant.entry_date, 'date') else tenant.entry_date
+                history = [type('obj', (object,), {'valid_from': entry_date or datetime.min, 'amount': tenant.rent})]
+            
+            # Generate expected rent for each month in the date range
+            expected_entries = []
+            current_date = max(start_date, tenant.entry_date.date() if hasattr(tenant.entry_date, 'date') else tenant.entry_date)
+            
+            # Ensure end_date is a date object
+            if hasattr(end_date, 'date'):
+                end_date = end_date.date()
+            
+            while current_date <= end_date:
+                # Find the applicable rent for the current date
+                applicable_rent = tenant.rent  # Default to current rent
+                
+                for record in history:
+                    valid_from = record.valid_from.date() if hasattr(record.valid_from, 'date') else record.valid_from
+                    if valid_from <= current_date:
+                        applicable_rent = record.amount
+                    else:
+                        break
+                
+                # Create an expected rent entry for this month if there's no actual payment
+                # Check if we have a payment for this month
+                current_month_str = current_date.strftime('%Y-%m')
+                has_payment = session.query(Payment).filter(
+                    Payment.tenant_id == tenant_id,
+                    Payment.payment_type == PaymentType.RENT,
+                    func.strftime('%Y-%m', Payment.reference_month) == current_month_str
+                ).first() is not None
+                
+                if not has_payment and applicable_rent > 0:
+                    # Create a date object for the first day of the month
+                    month_date = current_date.replace(day=1)
+                    if hasattr(month_date, 'date'):
+                        month_date = month_date.date()
+                    
+                    expected_entries.append({
+                        'id': None,
+                        'tenant_id': tenant_id,
+                        'payment_date': None,
+                        'amount': float(applicable_rent),  # Ensure it's a float
+                        'payment_type': PaymentType.RENT,
+                        'reference_month': month_date,
+                        'description': f'Renda esperada para {current_date.strftime("%B %Y")}',
+                        'status': 'EXPECTED',
+                        'is_expected': True,
+                        'created_at': datetime.now(),
+                        'updated_at': datetime.now()
+                    })
+                
+                # Move to the first day of the next month
+                try:
+                    if current_date.month == 12:
+                        current_date = current_date.replace(year=current_date.year + 1, month=1, day=1)
+                    else:
+                        current_date = current_date.replace(month=current_date.month + 1, day=1)
+                    
+                    # Ensure current_date is a date object for the next iteration
+                    if hasattr(current_date, 'date') and not isinstance(current_date, datetime.date):
+                        current_date = current_date.date()
+                except ValueError as e:
+                    # Handle invalid date (e.g., Feb 30)
+                    if current_date.month == 12:
+                        current_date = current_date.replace(year=current_date.year + 1, month=1, day=1)
+                    else:
+                        current_date = current_date.replace(month=current_date.month + 2, day=1)
+                    if hasattr(current_date, 'date'):
+                        current_date = current_date.date()
+            
+            return expected_entries
+
     def get_total_rent_collected(self, reference_month=None):
         """Get total rent collected for a specific month"""
         if reference_month is None:
