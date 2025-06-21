@@ -146,10 +146,10 @@ class DatabaseManager:
             tuple: (list_of_payments, total_count)
         """
         with self.Session() as session:
-            # Base query
+            # Base query for actual payments
             query = session.query(Payment).filter(Payment.tenant_id == tenant_id)
             
-            # Apply date filters
+            # Apply date filters to actual payments
             if start_date:
                 query = query.filter(Payment.payment_date >= start_date)
             if end_date:
@@ -174,7 +174,8 @@ class DatabaseManager:
                 )
             
             # Get actual payments
-            payments = query.order_by(Payment.payment_date.desc()).all()
+            actual_payments = query.order_by(Payment.payment_date.desc()).all()
+            payments = list(actual_payments)  # Create a copy to avoid modifying the original
             
             # If we should include expected rent entries
             if include_expected and (start_date and end_date) and not reference_month:
@@ -183,7 +184,7 @@ class DatabaseManager:
                 
                 # Convert actual payments to dict format for easier comparison
                 actual_payments_dict = {}
-                for payment in payments:
+                for payment in actual_payments:
                     if payment.reference_month:
                         month_key = payment.reference_month.strftime('%Y-%m')
                         actual_payments_dict[month_key] = payment
@@ -195,6 +196,16 @@ class DatabaseManager:
                         # Create a Payment-like object for the expected entry
                         payment = type('Payment', (), entry)
                         payments.append(payment)
+                
+                # Sort all payments by reference month in descending order (newest first)
+                payments.sort(
+                    key=lambda p: (
+                        getattr(p, 'reference_month', None) or 
+                        getattr(p, 'payment_date', None) or 
+                        datetime.min
+                    ),
+                    reverse=True
+                )
             
             # Apply pagination
             total = len(payments)
