@@ -1,27 +1,129 @@
 import sys
 import os
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QTranslator
+import logging
+from datetime import datetime
 
-# Add project root to Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Import Qt modules at the top level
+from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtCore import QTranslator, Qt
 
-from tenants_manager.views.main_window import MainWindow
+# Configure logging
+log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, f'app_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
+
+logging.basicConfig(
+    level=logging.DEBUG,  # More verbose logging
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file, encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 def main():
-    app = QApplication(sys.argv)
+    """Main function to run the application."""
+    logger.info("=" * 50)
+    logger.info("STARTING APPLICATION")
+    logger.info("=" * 50)
     
-    # Set Portuguese locale
-    translator = QTranslator()
-    if translator.load("pt", "i18n", ".qm"):
-        app.installTranslator(translator)
+    # Log system information
+    logger.info(f"Python version: {sys.version}")
+    logger.info(f"Python executable: {sys.executable}")
+    logger.info(f"Working directory: {os.getcwd()}")
+    logger.info(f"Script directory: {os.path.dirname(os.path.abspath(__file__))}")
     
     try:
+        # Create the application
+        logger.info("Creating QApplication...")
+        app = QApplication.instance()
+        if not app:
+            app = QApplication(sys.argv)
+            logger.info("New QApplication instance created")
+            
+            # Set application information
+            app.setApplicationName("Tenants Manager")
+            app.setApplicationVersion("1.0.0")
+            app.setOrganizationName("Tenants Manager")
+            logger.info("Application metadata set")
+            
+            # Try to load translations
+            try:
+                translator = QTranslator()
+                if translator.load("pt", "i18n", ".qm"):
+                    app.installTranslator(translator)
+                    logger.info("Portuguese translator loaded")
+                else:
+                    logger.warning("Failed to load Portuguese translator")
+            except Exception as e:
+                logger.error(f"Error loading translator: {e}", exc_info=True)
+        else:
+            logger.info("Using existing QApplication instance")
+            
+        # Create and show main window
+        logger.info("Creating MainWindow...")
         window = MainWindow()
+        logger.info("MainWindow created successfully")
+        
+        logger.info("Showing MainWindow...")
         window.show()
-        return app.exec()
+        logger.info("MainWindow shown")
+        
+        # Log window properties
+        logger.info(f"MainWindow geometry: {window.geometry().getRect()}")
+        logger.info(f"MainWindow is visible: {window.isVisible()}")
+        logger.info(f"MainWindow window state: {window.windowState().name}")
+        
+        # Run application
+        logger.info("Starting application event loop")
+        exit_code = app.exec()
+        logger.info(f"Application event loop ended with code: {exit_code}")
+        return exit_code
+        
     except Exception as e:
-        print(f"Error starting application: {e}")
+        logger.critical(f"FATAL ERROR: {str(e)}", exc_info=True)
+        # Try to show error message box
+        try:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Icon.Critical)
+            msg.setText("Critical Error")
+            msg.setInformativeText(f"An error occurred: {str(e)}\n\nCheck the log file for details.")
+            msg.setWindowTitle("Error")
+            msg.exec()
+        except Exception as ui_error:
+            logger.critical(f"Could not show error dialog: {ui_error}")
+        return 1
+
+# Add project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+
+# Import MainWindow after setting up the path
+try:
+    from tenants_manager.views.main_window import MainWindow
+    logger.info("Successfully imported MainWindow")
+except ImportError as e:
+    logger.error(f"Failed to import MainWindow: {e}")
+    raise
+
+def show_error_dialog(message, details=None):
+    """Show an error dialog with optional details"""
+    try:
+        app = QApplication.instance() or QApplication(sys.argv)
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Icon.Critical)
+        msg.setWindowTitle("Application Error")
+        msg.setText("An error occurred while starting the application.")
+        msg.setInformativeText(str(message))
+        
+        if details:
+            msg.setDetailedText(details)
+        
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        return msg.exec()
+    except Exception as e:
+        print(f"Error showing error dialog: {e}")
         return 1
 
 if __name__ == "__main__":
