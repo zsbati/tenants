@@ -10,9 +10,15 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 class DatabaseManager:
     def __init__(self):
+        # Use the original database path in the tenants_manager directory
         db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tenants.db')
+        print(f"Using database at: {db_path}")
+        
         self.engine = create_engine(f'sqlite:///{db_path}')
         self.Session = sessionmaker(bind=self.engine)
+        
+        # Initialize the database schema if needed
+        self.initialize_database()
     
     def initialize_database(self):
         Base.metadata.create_all(self.engine)
@@ -29,73 +35,148 @@ class DatabaseManager:
                 print(f"Error adding tenant: {str(e)}")
                 return False
 
-    def get_tenants(self, page=1, per_page=20, search_term=None, include_inactive=False):
-        """Get paginated list of tenants from the database
-        
-        Args:
-            page (int): Page number (1-based)
-            per_page (int): Number of items per page
-            search_term (str, optional): Optional search term to filter tenants by name
-            include_inactive (bool, optional): If True, includes soft-deleted tenants
-            
-        Returns:
-            tuple: (list_of_tenants, total_count)
-        """
-        print(f"\n=== get_tenants(page={page}, per_page={per_page}, search_term='{search_term}', include_inactive={include_inactive}) ===")
+    def get_tenants_count(self, search_term=None, include_deleted=False):
+        """Get the total count of tenants, optionally filtered by search term"""
+        print(f"\n=== get_tenants_count(search_term='{search_term}', include_deleted={include_deleted}) ===")
         
         with self.Session() as session:
             try:
-                print("Creating base query...")
-                if include_inactive:
-                    query = session.query(Tenant)
+                if include_deleted:
+                    query = session.query(func.count(Tenant.id))
                 else:
-                    query = Tenant.query_active(session)
-                print(f"Base query created. Query: {query}")
+                    query = session.query(func.count(Tenant.id)).filter(Tenant.is_active == True)
                 
-                # Apply search filter if provided
                 if search_term and search_term.strip():
-                    print(f"Applying search filter for: {search_term}")
                     search = f"%{search_term}%"
                     query = query.filter(Tenant.name.ilike(search))
                 
-                # Get total count for pagination
-                print("Counting total tenants...")
-                total = query.count()
-                print(f"Total tenants: {total}")
-                
-                # Apply pagination and order by name for consistent results
-                offset = (page - 1) * per_page
-                print(f"Fetching tenants (offset={offset}, limit={per_page})...")
-                tenants = query.order_by(Tenant.name).offset(offset).limit(per_page).all()
-                print(f"Retrieved {len(tenants)} tenant(s)")
-                
-                # Debug: Print all tenants
-                print("\nTenants retrieved:")
-                for i, tenant in enumerate(tenants, 1):
-                    print(f"  {i}. ID: {getattr(tenant, 'id', 'N/A')}, Name: {getattr(tenant, 'name', 'N/A')}, Type: {type(tenant)}")
-                
-                # Log any invalid tenant objects for debugging
-                invalid_tenants = [t for t in tenants if not hasattr(t, 'id')]
-                if invalid_tenants:
-                    print(f"\nWarning: Found {len(invalid_tenants)} invalid tenant objects:")
-                    for i, t in enumerate(invalid_tenants, 1):
-                        print(f"  {i}. Type: {type(t)}, Content: {t}")
-                
-                # Filter out invalid tenants
-                valid_tenants = [t for t in tenants if hasattr(t, 'id')]
-                print(f"\nReturning {len(valid_tenants)} valid tenant(s)")
-                
-                return valid_tenants, total
+                count = query.scalar() or 0
+                print(f"Found {count} tenants matching criteria")
+                return count
                 
             except Exception as e:
-                print(f"\n!!! ERROR in get_tenants: {str(e)}")
+                print(f"Error getting tenant count: {str(e)}")
                 import traceback
                 traceback.print_exc()
-                print("Returning empty list due to error")
-                return [], 0
+                return 0
+    
+    def get_tenants_paginated(self, offset=0, limit=20, search_term=None, include_deleted=False):
+        """Get a paginated list of tenants"""
+        print(f"\n=== get_tenants_paginated(offset={offset}, limit={limit}, search_term='{search_term}', include_deleted={include_deleted}) ===")
+        
+        with self.Session() as session:
+            try:
+                if include_deleted:
+                    query = session.query(Tenant)
+                else:
+                    query = session.query(Tenant).filter(Tenant.is_active == True)
+                
+                if search_term and search_term.strip():
+                    search = f"%{search_term}%"
+                    query = query.filter(Tenant.name.ilike(search))
+                
+                tenants = query.order_by(Tenant.name).offset(offset).limit(limit).all()
+                print(f"Retrieved {len(tenants)} tenants")
+                
+                # Print first few tenants for debugging
+                max_print = min(3, len(tenants))
+                for i in range(max_print):
+                    print(f"  {i+1}. {tenants[i].name} (ID: {tenants[i].id})")
+                if len(tenants) > max_print:
+                    print(f"  ... and {len(tenants) - max_print} more")
+                
+                return tenants
+                
+            except Exception as e:
+                print(f"Error getting paginated tenants: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                return []
+    
+    def get_tenants(self, page=1, per_page=20, search_term=None, include_inactive=False):
+        """Get paginated list of tenants from the database (legacy method)"""
+        print(f"\n=== get_tenants(page={page}, per_page={per_page}, search_term='{search_term}', include_inactive={include_inactive}) ===")
+        
+        # Get the total count
+        total = self.get_tenants_count(search_term, include_inactive)
+        
+        # Get paginated results
+        offset = (page - 1) * per_page
+        tenants = self.get_tenants_paginated(offset, per_page, search_term, include_inactive)
+        
+        return tenants, total
     
     def get_session(self):
         return self.Session()
+        
+    def delete_tenant(self, tenant_id, hard_delete=False):
+        """Delete a tenant, with option for hard or soft delete.
+        
+        Args:
+            tenant_id (int): The ID of the tenant to delete
+            hard_delete (bool): If True, permanently delete the tenant. 
+                             If False (default), perform a soft delete.
+            
+        Returns:
+            bool: True if the tenant was successfully deleted, False otherwise
+        """
+        with self.Session() as session:
+            try:
+                # Get the tenant
+                tenant = session.query(Tenant).get(tenant_id)
+                if not tenant:
+                    print(f"Error: No tenant found with ID {tenant_id}")
+                    return False
+                
+                if hard_delete:
+                    # Hard delete - remove the tenant completely
+                    session.delete(tenant)
+                    action = "hard-deleted"
+                else:
+                    # Soft delete - mark as inactive
+                    tenant.soft_delete()
+                    action = "soft-deleted"
+                
+                session.commit()
+                print(f"Successfully {action} tenant ID {tenant_id}")
+                return True
+                
+            except Exception as e:
+                session.rollback()
+                print(f"Error deleting tenant ID {tenant_id}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                return False
+                
+    def restore_tenant(self, tenant_id):
+        """Restore a soft-deleted tenant.
+        
+        Args:
+            tenant_id (int): The ID of the tenant to restore
+            
+        Returns:
+            bool: True if the tenant was successfully restored, False otherwise
+        """
+        with self.Session() as session:
+            try:
+                # Get the tenant, including soft-deleted ones
+                tenant = session.query(Tenant).filter_by(id=tenant_id).first()
+                if not tenant:
+                    print(f"Error: No tenant found with ID {tenant_id}")
+                    return False
+                    
+                # Restore the tenant
+                tenant.restore()
+                session.commit()
+                print(f"Successfully restored tenant ID {tenant_id}")
+                return True
+                
+            except Exception as e:
+                session.rollback()
+                print(f"Error restoring tenant ID {tenant_id}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                return False
         
     def record_payment(self, tenant_id, amount, payment_date=None, payment_type=PaymentType.RENT, 
                        reference_month=None, description=None, status=PaymentStatus.COMPLETED):

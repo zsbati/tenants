@@ -82,8 +82,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.tabs)
         
         # Status bar
-        self.statusBar = QStatusBar()
-        self.setStatusBar(self.statusBar)
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
         
         # Add separator
         separator = QFrame()
@@ -120,11 +120,16 @@ class MainWindow(QMainWindow):
         button_layout = QHBoxLayout()
         add_tenant_btn = QPushButton("Novo Inquilino")
         edit_tenant_btn = QPushButton("Editar Inquilino")
-        delete_tenant_btn = QPushButton("Excluir Inquilino")
+        self.delete_tenant_btn = QPushButton("Excluir Inquilino")
+        self.restore_tenant_btn = QPushButton("Restaurar Inquilino")
         
         button_layout.addWidget(add_tenant_btn)
         button_layout.addWidget(edit_tenant_btn)
-        button_layout.addWidget(delete_tenant_btn)
+        button_layout.addWidget(self.delete_tenant_btn)
+        button_layout.addWidget(self.restore_tenant_btn)
+        
+        # Initially hide the restore button
+        self.restore_tenant_btn.setVisible(False)
         
         # Add to top controls
         top_controls.addLayout(search_layout, 1)
@@ -135,12 +140,16 @@ class MainWindow(QMainWindow):
         # Connect buttons
         add_tenant_btn.clicked.connect(self.add_tenant)
         edit_tenant_btn.clicked.connect(self.edit_tenant)
-        delete_tenant_btn.clicked.connect(self.delete_tenant)
+        self.delete_tenant_btn.clicked.connect(self.delete_tenant)
+        self.restore_tenant_btn.clicked.connect(self.restore_tenant)
         
         # Create tenant table
         self.tenant_table = QTableWidget()
-        self.tenant_table.setColumnCount(8)
-        self.tenant_table.setHorizontalHeaderLabels(["Nome", "Quarto", "Renda (€)", "BI", "Email", "Telefone", "Endereço", "Data de Nascimento"])
+        self.tenant_table.setColumnCount(9)  # Added one more column for status
+        self.tenant_table.setHorizontalHeaderLabels(["Nome", "Quarto", "Renda (€)", "BI", "Email", "Telefone", "Endereço", "Data de Nascimento", "Status"])
+        
+        # Update button states when selection changes
+        self.tenant_table.itemSelectionChanged.connect(self.update_action_buttons)
         
         # Pagination controls
         pagination_layout = QHBoxLayout()
@@ -440,7 +449,8 @@ class MainWindow(QMainWindow):
             
             reply = QMessageBox.question(
                 self, 'Confirmar',
-                'Tem a certeza que deseja restaurar este inquilino?',
+                'Tem a certeza que deseja restaurar este inquilino?\n\n' +
+                'O inquilino voltará a estar visível na lista principal.',
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No
             )
@@ -448,27 +458,74 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.StandardButton.Yes:
                 if self.db_manager.restore_tenant(tenant_id):
                     self.load_tenants()
-                    QMessageBox.information(self, 'Sucesso', 'Inquilino restaurado com sucesso!')
+                    QMessageBox.information(
+                        self, 'Sucesso', 
+                        'Inquilino restaurado com sucesso!\n\n' +
+                        'O inquilino está agora visível na lista principal.'
+                    )
                 else:
                     QMessageBox.warning(self, 'Erro', 'Não foi possível restaurar o inquilino.')
-                    
+    
     def toggle_deleted_tenants(self, state):
         """Toggle visibility of deleted tenants"""
-        self.load_tenants()
-    
+        try:
+            self.current_page = 1  # Reset to first page
+            self.load_tenants()
+            
+            # Update the status bar message
+            show_deleted = self.show_deleted_checkbox.isChecked()
+            status_message = "Mostrando todos os inquilinos (incluindo removidos)" if show_deleted \
+                           else "Mostrando apenas inquilinos ativos"
+            self.status_bar.showMessage(status_message, 3000)  # Show for 3 seconds
+            
+        except Exception as e:
+            print(f"Error in toggle_deleted_tenants: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "Erro", f"Erro ao alternar visualização de inquilinos: {str(e)}")
+
     def load_tenants(self):
         """Load tenants from the database"""
+        print("\n=== Starting load_tenants ===")
         try:
-            self.tenant_table.setRowCount(0)
+            print("1. Calculating pagination...")
+            # Get the current page and rows per page
+            offset = (self.current_page - 1) * self.rows_per_page
+            show_deleted = self.show_deleted_checkbox.isChecked()
+            print(f"   - Page: {self.current_page}, Offset: {offset}, Rows per page: {self.rows_per_page}")
+            print(f"   - Show deleted: {show_deleted}")
             
-            # Get paginated tenants
-            show_deleted = hasattr(self, 'show_deleted_checkbox') and self.show_deleted_checkbox.isChecked()
-            tenants, total = self.db_manager.get_tenants(
-                page=self.current_page,
-                per_page=self.rows_per_page,
-                search_term=self.search_term,
-                include_inactive=show_deleted
-            )
+            print("2. Getting tenant count...")
+            # Get total count of tenants (for pagination)
+            try:
+                total = self.db_manager.get_tenants_count(
+                    search_term=self.search_term,
+                    include_deleted=show_deleted
+                )
+                print(f"   - Got tenant count: {total}")
+            except Exception as e:
+                print(f"ERROR getting tenant count: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                total = 0
+                
+            self.total_tenants = total
+            
+            print("3. Fetching paginated tenants...")
+            # Get paginated list of tenants
+            try:
+                tenants = self.db_manager.get_tenants_paginated(
+                    offset=offset,
+                    limit=self.rows_per_page,
+                    search_term=self.search_term,
+                    include_deleted=show_deleted
+                )
+                print(f"   - Retrieved {len(tenants)} tenants")
+            except Exception as e:
+                print(f"ERROR getting paginated tenants: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                tenants = []
             
             self.total_tenants = total
             total_pages = (total + self.rows_per_page - 1) // self.rows_per_page if total > 0 else 1
@@ -545,11 +602,18 @@ class MainWindow(QMainWindow):
                     tenant.birth_date.strftime("%d/%m/%Y") if tenant.birth_date else ""
                 ))
                 
+                # Add status as hidden data (is_deleted)
+                status_item = QTableWidgetItem(str(not getattr(tenant, 'is_active', True)))
+                self.tenant_table.setItem(row, 8, status_item)
+                
                 # Store the tenant ID in the first column for easy access
                 self.tenant_table.item(row, 0).setData(Qt.ItemDataRole.UserRole, tenant.id)
             
             # Resize columns to fit content
             self.tenant_table.resizeColumnsToContents()
+            
+            # Hide the status column
+            self.tenant_table.setColumnHidden(8, True)
             
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Erro ao carregar lista de inquilinos: {str(e)}")
@@ -664,19 +728,114 @@ class MainWindow(QMainWindow):
         dialog = PaymentHistoryWindow(tenant_id, parent_widget=self)
         dialog.exec()
 
-    def show_tenant_context_menu(self, position):
-        """Show context menu for tenant row"""
-        selected_rows = self.tenant_table.selectionModel().selectedRows()
-        if not selected_rows:
-            return
+    def update_action_buttons(self):
+        """Update the visibility of action buttons based on the selected tenant's status"""
+        try:
+            if not hasattr(self, 'tenant_table') or self.tenant_table.rowCount() == 0:
+                self.delete_tenant_btn.setEnabled(False)
+                self.restore_tenant_btn.setEnabled(False)
+                return
+                
+            selected_rows = self.tenant_table.selectionModel().selectedRows()
+            if not selected_rows:
+                self.delete_tenant_btn.setEnabled(False)
+                self.restore_tenant_btn.setEnabled(False)
+                return
+                
+            row = selected_rows[0].row()
             
-        row = selected_rows[0].row()
-        tenant_id = self.tenant_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
-        
-        menu = QMenu()
-        payment_action = menu.addAction("Ver Histórico de Pagamentos")
-        
-        action = menu.exec(self.tenant_table.viewport().mapToGlobal(position))
-        if action == payment_action:
-            dialog = PaymentHistoryWindow(tenant_id, parent_widget=self)
-            dialog.exec()
+            # Make sure the row is valid
+            if row < 0 or row >= self.tenant_table.rowCount():
+                self.delete_tenant_btn.setEnabled(False)
+                self.restore_tenant_btn.setEnabled(False)
+                return
+            
+            # Get the status item safely
+            status_item = self.tenant_table.item(row, 8)  # Status column
+            if not status_item:
+                # If status column is not available, assume tenant is active
+                is_deleted = False
+            else:
+                is_deleted = status_item.text().lower() == 'true'
+            
+            # Update button visibility and enabled state
+            self.delete_tenant_btn.setEnabled(not is_deleted)
+            self.restore_tenant_btn.setEnabled(is_deleted)
+            self.delete_tenant_btn.setVisible(not is_deleted)
+            self.restore_tenant_btn.setVisible(is_deleted)
+            
+        except Exception as e:
+            print(f"Error updating action buttons: {str(e)}")
+            # Default to safe state
+            self.delete_tenant_btn.setEnabled(False)
+            self.restore_tenant_btn.setEnabled(False)
+
+    def show_tenant_context_menu(self, position):
+        """Show context menu for tenant row with appropriate actions"""
+        try:
+            if not hasattr(self, 'tenant_table') or self.tenant_table.rowCount() == 0:
+                return
+                
+            # Get the selected row
+            selected_rows = self.tenant_table.selectionModel().selectedRows()
+            if not selected_rows:
+                return
+                
+            row = selected_rows[0].row()
+            
+            # Make sure the row is valid
+            if row < 0 or row >= self.tenant_table.rowCount():
+                return
+            
+            # Get the tenant ID and status
+            tenant_id_item = self.tenant_table.item(row, 0)  # First column has tenant ID as UserRole
+            status_item = self.tenant_table.item(row, 8)  # Status column
+            
+            if not tenant_id_item:
+                return
+                
+            tenant_id = tenant_id_item.data(Qt.ItemDataRole.UserRole)
+            
+            # Get the status safely
+            if not status_item:
+                # If status column is not available, assume tenant is active
+                is_deleted = False
+            else:
+                is_deleted = status_item.text().lower() == 'true'
+            
+            # Create the context menu
+            menu = QMenu()
+            
+            # Always show payment history option
+            payment_action = menu.addAction("Ver Histórico de Pagamentos")
+            menu.addSeparator()
+            
+            # Add edit action (only for active tenants)
+            edit_action = None
+            if not is_deleted:
+                edit_action = menu.addAction("Editar Inquilino")
+            
+            # Add delete/restore action based on status
+            if is_deleted:
+                restore_action = menu.addAction("Restaurar Inquilino")
+            else:
+                delete_action = menu.addAction("Excluir Inquilino")
+            
+            # Show the menu and get the selected action
+            action = menu.exec(self.tenant_table.viewport().mapToGlobal(position))
+            
+            # Handle the selected action
+            if action == payment_action:
+                # Show payment history for the selected tenant
+                dialog = PaymentHistoryWindow(tenant_id, parent_widget=self)
+                dialog.exec()
+            elif not is_deleted and action == edit_action:
+                self.edit_tenant()
+            elif is_deleted and action == restore_action:
+                self.restore_tenant()
+            elif not is_deleted and action == delete_action:
+                self.delete_tenant()
+                
+        except Exception as e:
+            print(f"Error showing context menu: {str(e)}")
+            QMessageBox.critical(self, "Erro", f"Erro ao exibir menu de contexto: {str(e)}")

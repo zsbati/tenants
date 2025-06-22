@@ -1,98 +1,79 @@
 """
 Direct test data generator script for the Tenants Manager application.
-This script can be run directly without module imports.
+This script generates test data using the application's models.
 """
 import os
 import sys
 import random
+import logging
 from datetime import datetime, timedelta
 
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Add project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+logger.info(f"Added project root to Python path: {project_root}")
+
 try:
+    logger.info("Importing required packages...")
     from faker import Faker
-    from sqlalchemy import create_engine, Column, Integer, String, Date, DateTime, Float, Boolean, ForeignKey, Enum
-    from sqlalchemy.ext.declarative import declarative_base
-    from sqlalchemy.orm import sessionmaker, relationship
-    from enum import Enum as PyEnum
+    from sqlalchemy import create_engine, inspect
+    from sqlalchemy.orm import sessionmaker
+    from tenants_manager.models.tenant import (
+        Base, Tenant, EmergencyContact, Payment, RentHistory,
+        PaymentStatus, PaymentType
+    )
+    logger.info("Successfully imported all required packages")
 except ImportError as e:
-    print("ERROR: Required packages are not installed.")
-    print(f"Please run: pip install faker==19.3.0 SQLAlchemy==2.0.21 python-dateutil==2.8.2")
-    print(f"Error details: {e}")
+    logger.error("ERROR: Required packages are not installed or there was an import error.")
+    logger.error(f"Please run: pip install -r requirements.txt")
+    logger.error(f"Error details: {e}")
     sys.exit(1)
-
-# --- Database Models ---
-Base = declarative_base()
-
-class PaymentStatus(PyEnum):
-    PENDING = "pending"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
-    REFUNDED = "refunded"
-
-class PaymentType(PyEnum):
-    RENT = "rent"
-    DEPOSIT = "deposit"
-    FINE = "fine"
-    OTHER = "other"
-
-class EmergencyContact(Base):
-    __tablename__ = 'emergency_contacts'
-    id = Column(Integer, primary_key=True)
-    tenant_id = Column(Integer, ForeignKey('tenants.id'))
-    name = Column(String(100), nullable=True)
-    phone = Column(String(20), nullable=True)
-    email = Column(String(100), nullable=True)
-
-class Payment(Base):
-    __tablename__ = 'payments'
-    id = Column(Integer, primary_key=True)
-    tenant_id = Column(Integer, ForeignKey('tenants.id'), nullable=False)
-    amount = Column(Float, nullable=False)
-    payment_date = Column(DateTime, default=datetime.utcnow, nullable=False)
-    payment_type = Column(Enum(PaymentType), nullable=False, default=PaymentType.RENT)
-    status = Column(Enum(PaymentStatus), nullable=False, default=PaymentStatus.COMPLETED)
-    reference_month = Column(Date, nullable=False)
-    description = Column(String(200), nullable=True)
-
-class RentHistory(Base):
-    __tablename__ = 'rent_history'
-    id = Column(Integer, primary_key=True)
-    tenant_id = Column(Integer, ForeignKey('tenants.id'), nullable=False)
-    amount = Column(Float, nullable=False)
-    valid_from = Column(DateTime, default=datetime.utcnow, nullable=False)
-    valid_to = Column(DateTime, nullable=True)
-    changed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    changed_by = Column(String(100), nullable=True)
-
-class Tenant(Base):
-    __tablename__ = 'tenants'
-    id = Column(Integer, primary_key=True)
-    name = Column(String(100), nullable=False)
-    room = Column(String(50), nullable=False)
-    rent = Column(Float, nullable=False)
-    bi = Column(String(20), unique=True, nullable=False)
-    email = Column(String(100), nullable=True)
-    phone = Column(String(20), nullable=True)
-    address = Column(String(200), nullable=True)
-    birth_date = Column(Date, nullable=False)
-    entry_date = Column(Date, nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False)
-    deleted_at = Column(DateTime, nullable=True)
 
 # --- Test Data Generation ---
 class TestDataGenerator:
-    def __init__(self, db_path='test_tenants.db'):
+    def __init__(self, db_path='tenants_manager/tenants.db'):
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
         self.engine = create_engine(f'sqlite:///{db_path}')
         self.Session = sessionmaker(bind=self.engine)
         self.fake = Faker('pt_PT')
         self.rooms = [f"{floor}{chr(room + 64)}" for floor in range(1, 6) for room in range(1, 7)]
+        self.db_path = db_path
+        
+        # Set up the database schema
+        self.init_db()
     
     def init_db(self):
         """Initialize the test database"""
-        Base.metadata.drop_all(self.engine)
-        Base.metadata.create_all(self.engine)
+        logger.info(f"Initializing database at {self.db_path}")
+        try:
+            logger.info("Dropping all existing tables...")
+            Base.metadata.drop_all(self.engine)
+            logger.info("Creating all tables...")
+            Base.metadata.create_all(self.engine)
+            
+            # Verify tables were created
+            inspector = inspect(self.engine)
+            tables = inspector.get_table_names()
+            logger.info(f"Database initialized. Tables created: {tables}")
+            return True
+        except Exception as e:
+            logger.error(f"Error initializing database: {e}")
+            return False
     
     def generate_tenant(self):
         """Generate a single tenant with realistic data"""
+        logger.debug("Generating tenant data...")
         entry_date = self.fake.date_between(start_date='-5y', end_date='today')
         birth_date = self.fake.date_of_birth(minimum_age=18, maximum_age=90)
         
@@ -111,162 +92,149 @@ class TestDataGenerator:
     
     def generate_emergency_contact(self, tenant_id):
         """Generate an emergency contact for a tenant"""
-        return EmergencyContact(
-            tenant_id=tenant_id,
-            name=self.fake.name(),
-            phone=f"9{random.randint(10, 99)}{random.randint(100000, 999999)}",
-            email=self.fake.email()
-        )
-    
-    def generate_rent_history(self, tenant_id, entry_date, current_rent):
-        """Generate rent history for a tenant"""
-        histories = []
-        current_date = entry_date
-        today = datetime.now()
-        
-        # Initial rent (slightly lower than current rent)
-        initial_rent = round(current_rent * random.uniform(0.8, 0.95), 2)
-        
-        # First rent entry
-        first_change_date = current_date + timedelta(days=random.randint(30, 180))
-        histories.append(RentHistory(
-            tenant_id=tenant_id,
-            amount=initial_rent,
-            valid_from=current_date,
-            valid_to=first_change_date,
-            changed_at=current_date
-        ))
-        
-        # Subsequent rent changes (0-3 changes)
-        num_changes = random.randint(0, 3)
-        for _ in range(num_changes):
-            change_date = first_change_date + timedelta(days=random.randint(180, 365))
-            if change_date > today:
-                break
-                
-            # Update rent with small increase
-            initial_rent = min(initial_rent * 1.03, current_rent)  # Max 3% increase
-            initial_rent = round(initial_rent, 2)
-            
-            histories.append(RentHistory(
+        logger.debug(f"Generating emergency contact for tenant {tenant_id}")
+        try:
+            contact = EmergencyContact(
                 tenant_id=tenant_id,
-                amount=initial_rent,
-                valid_from=first_change_date,
-                valid_to=change_date,
-                changed_at=first_change_date
-            ))
-            
-            first_change_date = change_date
-        
-        # Current rent
-        histories.append(RentHistory(
-            tenant_id=tenant_id,
-            amount=current_rent,
-            valid_from=first_change_date,
-            valid_to=None,
-            changed_at=first_change_date
-        ))
-        
-        return histories
+                name=self.fake.name(),
+                phone=self.fake.phone_number(),
+                email=self.fake.email()
+            )
+            logger.debug(f"Generated contact: {contact.name} ({contact.email})")
+            return contact
+        except Exception as e:
+            logger.error(f"Error generating emergency contact: {e}")
+            raise
     
-    def generate_payments(self, tenant_id, entry_date, monthly_rent):
-        """Generate payment history for a tenant"""
-        payments = []
-        current_date = entry_date
-        today = datetime.now()
-        
-        # Generate payments for each month
-        while current_date < today:
-            # Skip some months randomly (5% chance of missing a payment)
-            if random.random() > 0.05:
-                payment_date = current_date + timedelta(days=random.randint(0, 5))  # Payment within 5 days of due date
-                
-                # Sometimes pay multiple months at once (10% chance)
-                if random.random() < 0.1 and current_date + timedelta(days=30) < today:
-                    amount = monthly_rent * random.randint(2, 4)
-                    payment_date += timedelta(days=random.randint(0, 30))
-                else:
-                    amount = monthly_rent
-                
-                payments.append(Payment(
-                    tenant_id=tenant_id,
-                    amount=amount,
-                    payment_date=payment_date,
-                    payment_type=PaymentType.RENT,
-                    status=PaymentStatus.COMPLETED,
-                    reference_month=current_date.date(),
-                    description=f"Rent for {current_date.strftime('%B %Y')}"
-                ))
-            
-            # Move to next month
-            if current_date.month == 12:
-                current_date = current_date.replace(year=current_date.year + 1, month=1, day=1)
-            else:
-                current_date = current_date.replace(month=current_date.month + 1, day=1)
-        
-        return payments
+    def generate_rent_history(self, tenant_id, rent_amount, entry_date):
+        """Generate rent history for a tenant"""
+        logger.debug(f"Generating rent history for tenant {tenant_id}")
+        try:
+            history = RentHistory(
+                tenant_id=tenant_id,
+                amount=rent_amount,
+                valid_from=entry_date,
+                valid_to=None,
+                changed_at=datetime.utcnow(),
+                changed_by='system'
+            )
+            logger.debug(f"Generated rent history: {history.amount} from {history.valid_from}")
+            return history
+        except Exception as e:
+            logger.error(f"Error generating rent history: {e}")
+            raise
     
-    def generate_test_data(self, num_tenants=50):
-        """Generate test data for the specified number of tenants"""
-        print(f"Generating test data for {num_tenants} tenants...")
+    def generate_payment(self, tenant_id, reference_month):
+        """Generate a payment for a tenant"""
+        logger.debug(f"Generating payment for tenant {tenant_id} for {reference_month}")
+        try:
+            payment = Payment(
+                tenant_id=tenant_id,
+                amount=round(random.uniform(200, 1000), 2),
+                payment_date=self.fake.date_between(start_date=reference_month, end_date='today'),
+                payment_type=random.choice(list(PaymentType)),
+                status=random.choice(list(PaymentStatus)),
+                reference_month=reference_month,
+                description=f"Payment for {reference_month.strftime('%B %Y')}"
+            )
+            logger.debug(f"Generated payment of {payment.amount} {payment.payment_type}")
+            return payment
+        except Exception as e:
+            logger.error(f"Error generating payment: {e}")
+            raise
+    
+    def generate_tenants(self, count=10):
+        """Generate test tenants with related data"""
+        logger.info(f"Starting to generate {count} tenants...")
+        session = self.Session()
+        success_count = 0
         
-        # Initialize database
-        self.init_db()
-        
-        with self.Session() as session:
-            for i in range(1, num_tenants + 1):
-                # Generate tenant
-                tenant = self.generate_tenant()
-                session.add(tenant)
-                session.flush()  # Get the tenant ID
-                
-                # Add emergency contact for active tenants
-                if tenant.is_active and random.random() > 0.2:  # 80% chance of having emergency contact
+        try:
+            for i in range(count):
+                try:
+                    logger.info(f"Generating tenant {i+1}/{count}...")
+                    tenant = self.generate_tenant()
+                    session.add(tenant)
+                    session.flush()  # To get the tenant ID
+                    logger.debug(f"Created tenant: {tenant.name} (ID: {tenant.id})")
+                    
+                    # Add emergency contact
                     contact = self.generate_emergency_contact(tenant.id)
                     session.add(contact)
-                
-                # Generate rent history
-                entry_date = tenant.entry_date if isinstance(tenant.entry_date, datetime) else datetime.combine(tenant.entry_date, datetime.min.time())
-                rent_histories = self.generate_rent_history(tenant.id, entry_date, tenant.rent)
-                for history in rent_histories:
-                    session.add(history)
-                
-                # Generate payments
-                payments = self.generate_payments(tenant.id, entry_date, tenant.rent)
-                for payment in payments:
-                    session.add(payment)
-                
-                # Commit every 10 tenants
-                if i % 10 == 0:
+                    logger.debug(f"Added emergency contact: {contact.name}")
+                    
+                    # Add rent history
+                    rent_history = self.generate_rent_history(tenant.id, tenant.rent, tenant.entry_date)
+                    session.add(rent_history)
+                    logger.debug(f"Added rent history: {rent_history.amount} from {rent_history.valid_from}")
+                    
+                    # Add some payments
+                    months_since_entry = (datetime.now().date() - tenant.entry_date).days // 30
+                    payment_count = min(12, max(1, months_since_entry))  # 1-12 months of payments
+                    logger.debug(f"Generating {payment_count} payments...")
+                    
+                    for month in range(1, payment_count + 1):
+                        reference_month = tenant.entry_date + timedelta(days=30 * (month - 1))
+                        payment = self.generate_payment(tenant.id, reference_month)
+                        session.add(payment)
+                    
+                    # Commit after each tenant to avoid large transactions
                     session.commit()
-                    print(f"Generated {i} tenants...")
+                    success_count += 1
+                    logger.info(f"Successfully generated tenant {i+1}/{count}")
+                    
+                except Exception as e:
+                    logger.error(f"Error generating tenant {i+1}: {e}")
+                    session.rollback()
+                    # Continue with next tenant even if one fails
+                    continue
             
-            # Final commit
-            session.commit()
-        
-        print(f"\nSuccessfully generated test data for {num_tenants} tenants in 'test_tenants.db'")
-        print("You can now run your application with this test database.")
+            logger.info(f"Successfully generated {success_count} out of {count} tenants")
+            return success_count > 0
+            
+        except Exception as e:
+            logger.error(f"Fatal error in generate_tenants: {e}")
+            session.rollback()
+            return False
+        finally:
+            session.close()
 
 if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description='Generate test data for Tenants Manager')
-    parser.add_argument('num_tenants', type=int, nargs='?', default=50,
-                       help='Number of test tenants to generate (default: 50)')
-    parser.add_argument('--db', default='test_tenants.db',
-                       help='Database filename (default: test_tenants.db)')
+    parser.add_argument('count', type=int, nargs='?', default=10, 
+                      help='Number of tenants to generate (default: 10)')
+    parser.add_argument('--db', type=str, default='tenants_manager/tenants.db', 
+                      help='Path to the SQLite database file')
+    parser.add_argument('--debug', action='store_true',
+                      help='Enable debug logging')
     
     args = parser.parse_args()
     
-    print("=== Tenants Manager Test Data Generator ===")
-    print(f"Python version: {sys.version}")
-    print(f"Generating {args.num_tenants} test tenants in '{args.db}'...\n")
+    # Set log level based on debug flag
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
+    
+    logger.info(f"Tenant Manager Test Data Generator")
+    logger.info(f"Generating {args.count} test tenants in database: {args.db}")
     
     try:
-        generator = TestDataGenerator(args.db)
-        generator.generate_test_data(args.num_tenants)
+        # Initialize the generator
+        generator = TestDataGenerator(db_path=args.db)
+        
+        # Generate test data
+        success = generator.generate_tenants(args.count)
+        
+        if success:
+            logger.info("Test data generation completed successfully!")
+            sys.exit(0)
+        else:
+            logger.error("Test data generation failed. Check the logs above for errors.")
+            sys.exit(1)
+            
     except Exception as e:
-        print(f"\nError generating test data: {e}")
-        print("\nMake sure you have all required packages installed:")
-        print("pip install faker==19.3.0 SQLAlchemy==2.0.21 python-dateutil==2.8.2")
+        logger.critical(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
