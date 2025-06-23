@@ -1,27 +1,68 @@
+import os
+import sys
 from sqlalchemy import create_engine, func, and_, or_
 from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime, date
-from ..models.tenant import Base, Tenant, EmergencyContact, Payment, RentHistory, PaymentStatus, PaymentType
-import os
 
-# Add project root to Python path
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+# Enable debug logging
+debug = True
+
+def debug_log(*args, **kwargs):
+    """Print debug messages if debug is enabled."""
+    if debug:
+        print("[DB_DEBUG]", *args, file=sys.stderr, **kwargs)
+
+from ..models.tenant import Base, Tenant, EmergencyContact, Payment, RentHistory, PaymentStatus, PaymentType
+from ..config.database import get_database_url, get_migrations_dir
 
 class DatabaseManager:
-    def __init__(self):
-        # Use the original database path in the tenants_manager directory
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tenants.db')
-        print(f"Using database at: {db_path}")
+    def __init__(self, db_url=None):
+        """Initialize the database manager.
         
-        self.engine = create_engine(f'sqlite:///{db_path}')
-        self.Session = sessionmaker(bind=self.engine)
+        Args:
+            db_url: Optional database URL. If not provided, uses the URL from config.
+        """
+        debug_log("Initializing DatabaseManager")
+        self.db_url = db_url or get_database_url()
+        debug_log(f"Database URL: {self.db_url}")
         
-        # Initialize the database schema if needed
-        self.initialize_database()
+        try:
+            debug_log("Creating SQLAlchemy engine...")
+            self.engine = create_engine(self.db_url, echo=True)  # Enable SQL echo for debugging
+            debug_log("Engine created successfully")
+            
+            debug_log("Creating session maker...")
+            self.Session = sessionmaker(bind=self.engine)
+            debug_log("Session maker created successfully")
+            
+            # Initialize the database schema if needed
+            debug_log("Initializing database...")
+            self.initialize_database()
+            debug_log("Database initialization complete")
+            
+        except Exception as e:
+            debug_log(f"Error initializing database: {str(e)}")
+            debug_log(f"Database URL was: {self.db_url}")
+            raise
     
     def initialize_database(self):
-        Base.metadata.create_all(self.engine)
+        """Initialize the database by creating all tables."""
+        debug_log("Creating database tables...")
+        try:
+            Base.metadata.create_all(self.engine)
+            debug_log("Database tables created successfully")
+            
+            # Verify the database file was created
+            if 'sqlite' in self.db_url:
+                db_path = self.db_url.replace('sqlite:///', '')
+                debug_log(f"Checking if database file exists at: {db_path}")
+                if os.path.exists(db_path):
+                    debug_log("Database file exists")
+                else:
+                    debug_log("WARNING: Database file was not created!")
+        except Exception as e:
+            debug_log(f"Error creating database tables: {str(e)}")
+            raise
 
     def add_tenant(self, tenant):
         """Add a new tenant to the database"""

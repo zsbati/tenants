@@ -1,3 +1,42 @@
+# Database files
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/**/*.db
+data/**/*.sqlite
+data/**/*.sqlite3
+
+# Test files (except in scripts/)
+*_test.py
+*_tests.py
+test_*.py
+*_test_*.py
+*_debug.py
+debug_*.py
+*.bat
+!scripts/*.py  # Allow Python files in scripts/ directory
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+.DS_Store
+
+# Test output
+*.txt
+!requirements*.txt
+!README*.md
+!CHANGELOG*.md
+!LICENSE*.md
+
+# Environment variables
+.env
+
 # Python
 __pycache__/
 *.py[cod]
