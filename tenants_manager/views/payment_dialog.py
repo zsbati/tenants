@@ -30,7 +30,9 @@ class PaymentDialog(QDialog):
         
         # Payment type
         self.type_combo = QComboBox()
-        self.type_combo.addItems([t.value.capitalize() for t in PaymentType])
+        # Add translated payment types
+        for payment_type in PaymentType:
+            self.type_combo.addItem(self.tr(payment_type.value), payment_type)
         
         # Payment date (default to today)
         self.date_edit = QDateEdit()
@@ -75,7 +77,7 @@ class PaymentDialog(QDialog):
         """Return the payment data as a dictionary"""
         return {
             'amount': self.amount_input.value(),
-            'payment_type': list(PaymentType)[self.type_combo.currentIndex()],
+            'payment_type': self.type_combo.currentData(),
             'payment_date': self.date_edit.date().toPyDate(),
             'reference_month': self.reference_month_edit.date().toPyDate(),
             'description': self.description_edit.text().strip() or None,
