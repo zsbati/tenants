@@ -7,6 +7,10 @@ from PyQt6.QtGui import QAction
 import locale
 import sys
 import os
+import logging
+
+# Configure logger for this module
+logger = logging.getLogger(__name__)
 
 # Set Portuguese locale for date formatting
 locale.setlocale(locale.LC_TIME, 'pt_PT.UTF-8')  # For Linux/Unix
@@ -26,13 +30,13 @@ class MainWindow(QMainWindow):
     def __init__(self):
         try:
             super().__init__()
-            print("Initializing MainWindow...")
+            logger.debug("Initializing MainWindow...")
             self.setWindowTitle("Gestor de Inquilinos")
             self.setMinimumSize(1024, 768)
             
-            print("Creating DatabaseManager...")
+            logger.debug("Creating DatabaseManager...")
             self.db_manager = DatabaseManager()
-            print("Getting database session...")
+            logger.debug("Getting database session...")
             self.session = self.db_manager.get_session()
             
             # Pagination variables
@@ -41,16 +45,14 @@ class MainWindow(QMainWindow):
             self.total_tenants = 0
             self.search_term = ""
             
-            print("Initializing UI...")
+            logger.debug("Initializing UI...")
             self.init_ui()
-            print("Loading tenants...")
+            logger.debug("Loading tenants...")
             self.load_tenants()
-            print("Application started successfully!")
+            logger.info("Application started successfully")
             
         except Exception as e:
-            print(f"Error during initialization: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.exception("Error during initialization")
             QMessageBox.critical(None, "Erro de Inicialização", 
                                f"Ocorreu um erro ao iniciar o aplicativo:\n\n{str(e)}\n\nVerifique o log para mais detalhes.")
             raise  # Re-raise the exception to see the full traceback
@@ -63,7 +65,7 @@ class MainWindow(QMainWindow):
                 self.session.close()
             event.accept()
         except Exception as e:
-            print(f"Error closing window: {str(e)}")
+            logger.error(f"Error closing window: {str(e)}")
             event.accept()
     
     def init_ui(self):
@@ -479,39 +481,39 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(status_message, 3000)  # Show for 3 seconds
             
         except Exception as e:
-            print(f"Error in toggle_deleted_tenants: {str(e)}")
+            logger.error(f"Error in toggle_deleted_tenants: {str(e)}")
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "Erro", f"Erro ao alternar visualização de inquilinos: {str(e)}")
 
     def load_tenants(self):
         """Load tenants from the database"""
-        print("\n=== Starting load_tenants ===")
+        logger.debug("Starting load_tenants")
         try:
-            print("1. Calculating pagination...")
+            logger.debug("1. Calculating pagination...")
             # Get the current page and rows per page
             offset = (self.current_page - 1) * self.rows_per_page
             show_deleted = self.show_deleted_checkbox.isChecked()
-            print(f"   - Page: {self.current_page}, Offset: {offset}, Rows per page: {self.rows_per_page}")
-            print(f"   - Show deleted: {show_deleted}")
+            logger.debug(f"   - Page: {self.current_page}, Offset: {offset}, Rows per page: {self.rows_per_page}")
+            logger.debug(f"   - Show deleted: {show_deleted}")
             
-            print("2. Getting tenant count...")
+            logger.debug("2. Getting tenant count...")
             # Get total count of tenants (for pagination)
             try:
                 total = self.db_manager.get_tenants_count(
                     search_term=self.search_term,
                     include_deleted=show_deleted
                 )
-                print(f"   - Got tenant count: {total}")
+                logger.debug(f"   - Got tenant count: {total}")
             except Exception as e:
-                print(f"ERROR getting tenant count: {str(e)}")
+                logger.error(f"ERROR getting tenant count: {str(e)}")
                 import traceback
                 traceback.print_exc()
                 total = 0
                 
             self.total_tenants = total
             
-            print("3. Fetching paginated tenants...")
+            logger.debug("3. Fetching paginated tenants...")
             # Get paginated list of tenants
             try:
                 tenants = self.db_manager.get_tenants_paginated(
@@ -520,9 +522,9 @@ class MainWindow(QMainWindow):
                     search_term=self.search_term,
                     include_deleted=show_deleted
                 )
-                print(f"   - Retrieved {len(tenants)} tenants")
+                logger.debug(f"   - Retrieved {len(tenants)} tenants")
             except Exception as e:
-                print(f"ERROR getting paginated tenants: {str(e)}")
+                logger.error(f"ERROR getting paginated tenants: {str(e)}")
                 import traceback
                 traceback.print_exc()
                 tenants = []
@@ -543,14 +545,14 @@ class MainWindow(QMainWindow):
             self.tenant_table.setRowCount(0)
             
             # Debug: Print info about the tenants we received
-            print(f"\n--- Loading {len(tenants)} tenants (page {self.current_page}, {self.rows_per_page} per page) ---")
+            logger.debug(f"Loading {len(tenants)} tenants (page {self.current_page}, {self.rows_per_page} per page)")
             
             # Add rows for each tenant
             for i, tenant in enumerate(tenants, 1):
-                print(f"Tenant {i}: Type={type(tenant)}, ID={getattr(tenant, 'id', 'N/A')}, Name={getattr(tenant, 'name', 'N/A')}")
+                logger.debug(f"Tenant {i}: Type={type(tenant)}, ID={getattr(tenant, 'id', 'N/A')}, Name={getattr(tenant, 'name', 'N/A')}")
                 
                 if not hasattr(tenant, 'id'):
-                    print(f"Warning: Tenant object has no 'id' attribute: {tenant}")
+                    logger.warning(f"Tenant object has no 'id' attribute: {tenant}")
                     continue
                     
                 row = self.tenant_table.rowCount()
@@ -560,13 +562,13 @@ class MainWindow(QMainWindow):
                     # Ensure we're passing a valid tenant ID
                     tenant_id = getattr(tenant, 'id', None)
                     if tenant_id is None:
-                        print(f"Warning: Tenant object has no 'id' attribute: {tenant}")
+                        logger.warning(f"Tenant object has no 'id' attribute: {tenant}")
                         balance = 0.0
                     else:
-                        print(f"Getting balance for tenant ID: {tenant_id}")
+                        logger.debug(f"Getting balance for tenant ID: {tenant_id}")
                         balance = self.db_manager.get_tenant_balance(tenant_id)
                 except Exception as e:
-                    print(f"Error getting balance for tenant {getattr(tenant, 'id', 'N/A')}: {str(e)}")
+                    logger.error(f"Error getting balance for tenant {getattr(tenant, 'id', 'N/A')}: {str(e)}")
                     import traceback
                     traceback.print_exc()
                     balance = 0.0
@@ -664,7 +666,7 @@ class MainWindow(QMainWindow):
         
         for tenant in tenants:
             if not hasattr(tenant, 'id'):
-                print(f"Warning: Invalid tenant object in load_payments: {tenant}")
+                logger.warning(f"Invalid tenant object in load_payments: {tenant}")
                 continue
             # Get payment status for the reference month
             payments, _ = self.db_manager.get_tenant_payments(
@@ -765,7 +767,7 @@ class MainWindow(QMainWindow):
             self.restore_tenant_btn.setVisible(is_deleted)
             
         except Exception as e:
-            print(f"Error updating action buttons: {str(e)}")
+            logger.error(f"Error updating action buttons: {str(e)}")
             # Default to safe state
             self.delete_tenant_btn.setEnabled(False)
             self.restore_tenant_btn.setEnabled(False)
@@ -837,5 +839,5 @@ class MainWindow(QMainWindow):
                 self.delete_tenant()
                 
         except Exception as e:
-            print(f"Error showing context menu: {str(e)}")
+            logger.error(f"Error showing context menu: {str(e)}")
             QMessageBox.critical(self, "Erro", f"Erro ao exibir menu de contexto: {str(e)}")

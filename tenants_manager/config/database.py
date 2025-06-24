@@ -12,11 +12,12 @@ LOG_DIR = BASE_DIR / 'logs'
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Set up file logging
+# Configure database logging to be less verbose
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.WARNING,  # Changed from DEBUG to WARNING
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(LOG_DIR / 'database.log', mode='w'),
+        logging.FileHandler(LOG_DIR / 'database.log', mode='a'),  # Changed to append mode
     ]
 )
 logger = logging.getLogger(__name__)

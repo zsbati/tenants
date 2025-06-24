@@ -7,20 +7,58 @@ from datetime import datetime
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import QTranslator, Qt
 
-# Configure logging
-log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
-os.makedirs(log_dir, exist_ok=True)
-log_file = os.path.join(log_dir, f'app_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
+def configure_logging():
+    """Configure logging with appropriate levels and handlers"""
+    # Determine log level from environment variable, default to INFO
+    log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
+    try:
+        log_level = getattr(logging, log_level)
+    except AttributeError:
+        log_level = logging.INFO
+    
+    # Create logs directory if it doesn't exist
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Create a log file with current timestamp
+    log_file = os.path.join(log_dir, f'app_{datetime.now().strftime("%Y%m%d")}.log')
+    
+    # Create formatter
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+    
+    # Clear any existing handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Add file handler
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+    
+    # Add console handler only if not in production
+    if os.getenv('ENV') != 'production':
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
+    
+    # Set SQLAlchemy logging level to reduce noise
+    logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+    
+    # Set our application log level
+    app_logger = logging.getLogger('tenants_manager')
+    app_logger.setLevel(log_level)
+    
+    return app_logger
 
-logging.basicConfig(
-    level=logging.DEBUG,  # More verbose logging
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+# Initialize logging
+logger = configure_logging()
 
 def main():
     """Main function to run the application."""
@@ -123,7 +161,8 @@ def show_error_dialog(message, details=None):
         msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         return msg.exec()
     except Exception as e:
-        print(f"Error showing error dialog: {e}")
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error showing error dialog: {e}", exc_info=True)
         return 1
 
 if __name__ == "__main__":

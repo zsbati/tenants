@@ -1,8 +1,12 @@
+import logging
 from sqlalchemy import Boolean, Column, Integer, String, Date, DateTime, Float, ForeignKey, Enum, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from enum import Enum as PyEnum
+
+# Configure logger for this module
+logger = logging.getLogger(__name__)
 
 Base = declarative_base()
 
@@ -133,7 +137,7 @@ class Tenant(Base):
             
         except Exception as e:
             session.rollback()
-            print(f"Error updating rent: {str(e)}")
+            logger.error(f"Error updating rent for tenant {self.id}: {str(e)}", exc_info=True)
             return False
     
     def get_balance(self, as_of_date=None):

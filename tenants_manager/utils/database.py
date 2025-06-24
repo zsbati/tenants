@@ -1,19 +1,14 @@
 import os
 import sys
+import logging
+from datetime import datetime, date
 from sqlalchemy import create_engine, func, and_, or_
 from sqlalchemy.orm import sessionmaker, Session
-from datetime import datetime, date
-
-# Enable debug logging
-debug = True
-
-def debug_log(*args, **kwargs):
-    """Print debug messages if debug is enabled."""
-    if debug:
-        print("[DB_DEBUG]", *args, file=sys.stderr, **kwargs)
-
 from ..models.tenant import Base, Tenant, EmergencyContact, Payment, RentHistory, PaymentStatus, PaymentType
 from ..config.database import get_database_url, get_migrations_dir
+
+# Configure logger for this module
+logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     def __init__(self, db_url=None):
@@ -22,46 +17,48 @@ class DatabaseManager:
         Args:
             db_url: Optional database URL. If not provided, uses the URL from config.
         """
-        debug_log("Initializing DatabaseManager")
+        logger.debug("Initializing DatabaseManager")
         self.db_url = db_url or get_database_url()
-        debug_log(f"Database URL: {self.db_url}")
+        logger.debug(f"Database URL: {self.db_url}")
         
         try:
-            debug_log("Creating SQLAlchemy engine...")
-            self.engine = create_engine(self.db_url, echo=True)  # Enable SQL echo for debugging
-            debug_log("Engine created successfully")
+            logger.debug("Creating SQLAlchemy engine...")
+            # Disable SQL echo in production, can be enabled via environment variable if needed
+            echo_sql = os.getenv('SQL_ECHO', 'false').lower() == 'true'
+            self.engine = create_engine(self.db_url, echo=echo_sql)
+            logger.debug("Engine created successfully")
             
-            debug_log("Creating session maker...")
+            logger.debug("Creating session maker...")
             self.Session = sessionmaker(bind=self.engine)
-            debug_log("Session maker created successfully")
+            logger.debug("Session maker created successfully")
             
             # Initialize the database schema if needed
-            debug_log("Initializing database...")
+            logger.debug("Initializing database...")
             self.initialize_database()
-            debug_log("Database initialization complete")
+            logger.debug("Database initialization complete")
             
         except Exception as e:
-            debug_log(f"Error initializing database: {str(e)}")
-            debug_log(f"Database URL was: {self.db_url}")
+            logger.error(f"Error initializing database: {str(e)}")
+            logger.error(f"Database URL was: {self.db_url}")
             raise
     
     def initialize_database(self):
         """Initialize the database by creating all tables."""
-        debug_log("Creating database tables...")
+        logger.debug("Creating database tables...")
         try:
             Base.metadata.create_all(self.engine)
-            debug_log("Database tables created successfully")
+            logger.debug("Database tables created successfully")
             
             # Verify the database file was created
             if 'sqlite' in self.db_url:
                 db_path = self.db_url.replace('sqlite:///', '')
-                debug_log(f"Checking if database file exists at: {db_path}")
+                logger.debug(f"Checking if database file exists at: {db_path}")
                 if os.path.exists(db_path):
-                    debug_log("Database file exists")
+                    logger.debug("Database file exists")
                 else:
-                    debug_log("WARNING: Database file was not created!")
+                    logger.warning("Database file was not created!")
         except Exception as e:
-            debug_log(f"Error creating database tables: {str(e)}")
+            logger.error(f"Error creating database tables: {str(e)}")
             raise
 
     def add_tenant(self, tenant):
@@ -73,12 +70,12 @@ class DatabaseManager:
                 return True
             except Exception as e:
                 session.rollback()
-                print(f"Error adding tenant: {str(e)}")
+                logger.error(f"Error adding tenant: {str(e)}")
                 return False
 
     def get_tenants_count(self, search_term=None, include_deleted=False):
         """Get the total count of tenants, optionally filtered by search term"""
-        print(f"\n=== get_tenants_count(search_term='{search_term}', include_deleted={include_deleted}) ===")
+        logger.debug(f"Getting tenants count with search_term='{search_term}', include_deleted={include_deleted}")
         
         with self.Session() as session:
             try:
@@ -92,18 +89,18 @@ class DatabaseManager:
                     query = query.filter(Tenant.name.ilike(search))
                 
                 count = query.scalar() or 0
-                print(f"Found {count} tenants matching criteria")
+                logger.debug(f"Found {count} tenants matching criteria")
                 return count
                 
             except Exception as e:
-                print(f"Error getting tenant count: {str(e)}")
+                logger.error(f"Error getting tenant count: {str(e)}")
                 import traceback
                 traceback.print_exc()
                 return 0
     
     def get_tenants_paginated(self, offset=0, limit=20, search_term=None, include_deleted=False):
         """Get a paginated list of tenants"""
-        print(f"\n=== get_tenants_paginated(offset={offset}, limit={limit}, search_term='{search_term}', include_deleted={include_deleted}) ===")
+        logger.debug(f"Getting paginated tenants: offset={offset}, limit={limit}, search_term='{search_term}', include_deleted={include_deleted}")
         
         with self.Session() as session:
             try:
@@ -117,26 +114,26 @@ class DatabaseManager:
                     query = query.filter(Tenant.name.ilike(search))
                 
                 tenants = query.order_by(Tenant.name).offset(offset).limit(limit).all()
-                print(f"Retrieved {len(tenants)} tenants")
+                logger.debug(f"Retrieved {len(tenants)} tenants")
                 
                 # Print first few tenants for debugging
                 max_print = min(3, len(tenants))
                 for i in range(max_print):
-                    print(f"  {i+1}. {tenants[i].name} (ID: {tenants[i].id})")
+                    logger.debug(f"  {i+1}. {tenants[i].name} (ID: {tenants[i].id})")
                 if len(tenants) > max_print:
-                    print(f"  ... and {len(tenants) - max_print} more")
+                    logger.debug(f"  ... and {len(tenants) - max_print} more")
                 
                 return tenants
                 
             except Exception as e:
-                print(f"Error getting paginated tenants: {str(e)}")
+                logger.error(f"Error getting paginated tenants: {str(e)}")
                 import traceback
                 traceback.print_exc()
                 return []
     
     def get_tenants(self, page=1, per_page=20, search_term=None, include_inactive=False):
         """Get paginated list of tenants from the database (legacy method)"""
-        print(f"\n=== get_tenants(page={page}, per_page={per_page}, search_term='{search_term}', include_inactive={include_inactive}) ===")
+        logger.debug(f"Getting tenants: page={page}, per_page={per_page}, search_term='{search_term}', include_inactive={include_inactive}")
         
         # Get the total count
         total = self.get_tenants_count(search_term, include_inactive)
@@ -179,12 +176,12 @@ class DatabaseManager:
                     action = "soft-deleted"
                 
                 session.commit()
-                print(f"Successfully {action} tenant ID {tenant_id}")
+                logger.info(f"Successfully {action} tenant ID {tenant_id}")
                 return True
                 
             except Exception as e:
                 session.rollback()
-                print(f"Error deleting tenant ID {tenant_id}: {str(e)}")
+                logger.error(f"Error deleting tenant ID {tenant_id}: {str(e)}")
                 import traceback
                 traceback.print_exc()
                 return False
@@ -209,12 +206,12 @@ class DatabaseManager:
                 # Restore the tenant
                 tenant.restore()
                 session.commit()
-                print(f"Successfully restored tenant ID {tenant_id}")
+                logger.info(f"Successfully restored tenant ID {tenant_id}")
                 return True
                 
             except Exception as e:
                 session.rollback()
-                print(f"Error restoring tenant ID {tenant_id}: {str(e)}")
+                logger.error(f"Error restoring tenant ID {tenant_id}: {str(e)}")
                 import traceback
                 traceback.print_exc()
                 return False
@@ -247,7 +244,7 @@ class DatabaseManager:
                 return payment
             except Exception as e:
                 session.rollback()
-                print(f"Error recording payment: {str(e)}")
+                logger.error(f"Error recording payment: {str(e)}")
                 return None
     
     def get_tenant_payments(self, tenant_id, start_date=None, end_date=None, reference_month=None, 
@@ -460,7 +457,7 @@ class DatabaseManager:
             if as_of_date is None:
                 as_of_date = datetime.utcnow()
                 
-            print(f"Getting balance for tenant_id: {tenant_id}, type: {type(tenant_id)}")
+            logger.debug(f"Getting balance for tenant_id: {tenant_id}, type: {type(tenant_id)}")
             
             with self.Session() as session:
                 # Ensure tenant_id is an integer
@@ -469,21 +466,19 @@ class DatabaseManager:
                         tenant_id = tenant_id[0]  # Take first item if it's a list
                     tenant_id = int(tenant_id)  # Ensure it's an integer
                 except (ValueError, TypeError) as e:
-                    print(f"Error converting tenant_id to int: {e}, type: {type(tenant_id)}")
+                    logger.error(f"Error converting tenant_id to int: {e}, type: {type(tenant_id)}")
                     return 0.0
                 
                 tenant = session.query(Tenant).get(tenant_id)
                 if not tenant:
-                    print(f"No tenant found with id: {tenant_id}")
+                    logger.debug(f"No tenant found with id: {tenant_id}")
                     return 0.0
-                
-                print(f"Found tenant: ID={tenant.id}, Name={getattr(tenant, 'name', 'N/A')}")
+                logger.debug(f"Found tenant: ID={tenant.id}, Name={getattr(tenant, 'name', 'N/A')}")
                 return tenant.get_balance(as_of_date)
                 
         except Exception as e:
-            print(f"Error in get_tenant_balance: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Error in get_tenant_balance: {str(e)}")
+            logger.exception("Exception in get_tenant_balance")
             return 0.0
     
     def get_total_debt(self, as_of_date=None):
