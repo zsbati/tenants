@@ -163,7 +163,7 @@ class DatabaseManager:
                 # Get the tenant
                 tenant = session.query(Tenant).get(tenant_id)
                 if not tenant:
-                    print(f"Error: No tenant found with ID {tenant_id}")
+                    logger.warning(f"No tenant found with ID {tenant_id} for deletion")
                     return False
                 
                 if hard_delete:
@@ -181,9 +181,7 @@ class DatabaseManager:
                 
             except Exception as e:
                 session.rollback()
-                logger.error(f"Error deleting tenant ID {tenant_id}: {str(e)}")
-                import traceback
-                traceback.print_exc()
+                logger.exception(f"Error deleting tenant ID {tenant_id}")
                 return False
                 
     def restore_tenant(self, tenant_id):
@@ -200,7 +198,7 @@ class DatabaseManager:
                 # Get the tenant, including soft-deleted ones
                 tenant = session.query(Tenant).filter_by(id=tenant_id).first()
                 if not tenant:
-                    print(f"Error: No tenant found with ID {tenant_id}")
+                    logger.warning(f"No tenant found with ID {tenant_id} for restoration")
                     return False
                     
                 # Restore the tenant
@@ -211,9 +209,7 @@ class DatabaseManager:
                 
             except Exception as e:
                 session.rollback()
-                logger.error(f"Error restoring tenant ID {tenant_id}: {str(e)}")
-                import traceback
-                traceback.print_exc()
+                logger.exception(f"Error restoring tenant ID {tenant_id}")
                 return False
         
     def record_payment(self, tenant_id, amount, payment_date=None, payment_type=PaymentType.RENT, 

@@ -1,6 +1,7 @@
 import sys
 import os
 import logging
+import logging.handlers
 from datetime import datetime
 
 # Import Qt modules at the top level
@@ -8,7 +9,15 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import QTranslator, Qt
 
 def configure_logging():
-    """Configure logging with appropriate levels and handlers"""
+    """Configure logging with appropriate levels and handlers.
+    
+    Log Levels:
+    - DEBUG: Detailed information, typically of interest only when diagnosing problems.
+    - INFO: Confirmation that things are working as expected.
+    - WARNING: An indication that something unexpected happened.
+    - ERROR: Due to a more serious problem, the software has not been able to perform some function.
+    - CRITICAL: A serious error, indicating that the program itself may be unable to continue running.
+    """
     # Determine log level from environment variable, default to INFO
     log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
     try:
@@ -20,12 +29,12 @@ def configure_logging():
     log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
     os.makedirs(log_dir, exist_ok=True)
     
-    # Create a log file with current timestamp
+    # Create a log file with current date (daily rotation)
     log_file = os.path.join(log_dir, f'app_{datetime.now().strftime("%Y%m%d")}.log')
     
-    # Create formatter
+    # Create formatter with fixed width for log levels
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        '%(asctime)s - %(name)-30s - %(levelname)-8s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     
@@ -33,12 +42,17 @@ def configure_logging():
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
     
-    # Clear any existing handlers
+    # Clear any existing handlers to avoid duplicate logs
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
     
-    # Add file handler
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    # Add file handler with rotation (20MB per file, keep 5 backups)
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file, 
+        maxBytes=20*1024*1024,  # 20MB
+        backupCount=5,
+        encoding='utf-8'
+    )
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
     
@@ -48,12 +62,34 @@ def configure_logging():
         console_handler.setFormatter(formatter)
         root_logger.addHandler(console_handler)
     
-    # Set SQLAlchemy logging level to reduce noise
-    logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+    # Configure SQLAlchemy logging
+    sql_logger = logging.getLogger('sqlalchemy')
+    sql_logger.setLevel(logging.WARNING)  # Only show warnings and above
+    sql_logger.propagate = False  # Prevent duplicate logs
     
-    # Set our application log level
+    # Configure database module logging
+    db_logger = logging.getLogger('tenants_manager.config.database')
+    db_logger.setLevel(logging.WARNING if os.getenv('ENV') == 'production' else logging.INFO)
+    
+    # Create and configure application logger
     app_logger = logging.getLogger('tenants_manager')
     app_logger.setLevel(log_level)
+    
+    # Add a filter to prevent duplicate logs
+    class NoDuplicateFilter(logging.Filter):
+        def filter(self, record):
+            # Prevent duplicate log messages
+            current_log = (record.module, record.levelno, record.msg % record.args if record.args else record.msg)
+            if not hasattr(self, 'last_log'):
+                self.last_log = None
+            if current_log == self.last_log:
+                return False
+            self.last_log = current_log
+            return True
+    
+    # Apply the filter to all handlers
+    for handler in logging.root.handlers:
+        handler.addFilter(NoDuplicateFilter())
     
     return app_logger
 
