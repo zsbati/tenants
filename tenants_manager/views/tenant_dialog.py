@@ -1,7 +1,19 @@
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QFormLayout, QDateEdit, QMessageBox, QHBoxLayout, QGroupBox)
+from PyQt6.QtWidgets import (
+    QDialog,
+    QVBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QFormLayout,
+    QDateEdit,
+    QMessageBox,
+    QHBoxLayout,
+    QGroupBox,
+)
 from PyQt6.QtCore import Qt, QDate
 from tenants_manager.models.tenant import Tenant, EmergencyContact
 from tenants_manager.utils.database import DatabaseManager
+
 
 class TenantDialog(QDialog):
     def __init__(self, tenant=None, parent=None, is_deleted=False):
@@ -15,36 +27,38 @@ class TenantDialog(QDialog):
 
         # Main layout
         layout = QVBoxLayout()
-        
+
         # Show deletion status if viewing a deleted tenant
         if self.is_deleted:
-            deleted_label = QLabel("<span style='color: red; font-weight: bold;'>ESTE INQUILINO ESTÁ MARCADO COMO REMOVIDO</span>")
+            deleted_label = QLabel(
+                "<span style='color: red; font-weight: bold;'>ESTE INQUILINO ESTÁ MARCADO COMO REMOVIDO</span>"
+            )
             deleted_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(deleted_label)
-            
+
             # Add a separator
             separator = QFrame()
             separator.setFrameShape(QFrame.Shape.HLine)
             separator.setFrameShadow(QFrame.Shadow.Sunken)
             layout.addWidget(separator)
-        
+
         # Name and Room
         name_room_layout = QHBoxLayout()
-        
+
         # Name
         name_label = QLabel("Nome:")
         self.name_input = QLineEdit()
         name_layout = QHBoxLayout()
         name_layout.addWidget(name_label)
         name_layout.addWidget(self.name_input)
-        
+
         # Room
         room_label = QLabel("Quarto:")
         self.room_input = QLineEdit()
         room_layout = QHBoxLayout()
         room_layout.addWidget(room_label)
         room_layout.addWidget(self.room_input)
-        
+
         name_room_layout.addLayout(name_layout)
         name_room_layout.addLayout(room_layout)
 
@@ -65,7 +79,7 @@ class TenantDialog(QDialog):
         self.phone_input = QLineEdit()
         self.phone_input.setPlaceholderText("Opcional")
         form_layout.addRow("Telefone:", self.phone_input)
-        
+
         # Rent (mandatory)
         self.rent_input = QLineEdit()
         self.rent_input.setPlaceholderText("Obrigatório")
@@ -112,7 +126,7 @@ class TenantDialog(QDialog):
 
         # Add form layout to main layout
         layout.addLayout(form_layout)
-        
+
         # Disable all inputs if viewing a deleted tenant
         if self.is_deleted:
             self.set_read_only(True)
@@ -144,7 +158,7 @@ class TenantDialog(QDialog):
                 self.birth_input.setDate(self.tenant.birth_date)
             if self.tenant.entry_date:
                 self.entry_input.setDate(self.tenant.entry_date)
-            
+
             # Populate emergency contact if exists
             if self.tenant.emergency_contact:
                 self.emergency_name_input.setText(self.tenant.emergency_contact.name)
@@ -168,22 +182,24 @@ class TenantDialog(QDialog):
         if not self.entry_input.date().isValid():
             QMessageBox.warning(self, "Erro", "A data de entrada é obrigatória!")
             return None
-            
+
         # Validate rent
         try:
-            rent = float(self.rent_input.text().replace(',', '.'))
+            rent = float(self.rent_input.text().replace(",", "."))
             if rent <= 0:
                 QMessageBox.warning(self, "Erro", "A renda deve ser maior que zero!")
                 return None
         except ValueError:
-            QMessageBox.warning(self, "Erro", "Por favor, insira um valor numérico válido para a renda!")
+            QMessageBox.warning(
+                self, "Erro", "Por favor, insira um valor numérico válido para a renda!"
+            )
             return None
 
         # Create tenant object
         tenant = Tenant()
         tenant.name = self.name_input.text()
         tenant.room = self.room_input.text()
-        tenant.rent = float(self.rent_input.text().replace(',', '.'))
+        tenant.rent = float(self.rent_input.text().replace(",", "."))
         tenant.bi = self.bi_input.text()
         tenant.email = self.email_input.text()
         tenant.phone = self.phone_input.text()
@@ -192,9 +208,13 @@ class TenantDialog(QDialog):
         tenant.entry_date = self.entry_input.date().toPyDate()
 
         # Create emergency contact if any fields are filled
-        if any([self.emergency_name_input.text(), 
-                self.emergency_phone_input.text(), 
-                self.emergency_email_input.text()]):
+        if any(
+            [
+                self.emergency_name_input.text(),
+                self.emergency_phone_input.text(),
+                self.emergency_email_input.text(),
+            ]
+        ):
             emergency_contact = EmergencyContact()
             emergency_contact.name = self.emergency_name_input.text()
             emergency_contact.phone = self.emergency_phone_input.text()

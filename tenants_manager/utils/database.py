@@ -4,54 +4,63 @@ import logging
 from datetime import datetime, date
 from sqlalchemy import create_engine, func, and_, or_
 from sqlalchemy.orm import sessionmaker, Session
-from ..models.tenant import Base, Tenant, EmergencyContact, Payment, RentHistory, PaymentStatus, PaymentType
+from ..models.tenant import (
+    Base,
+    Tenant,
+    EmergencyContact,
+    Payment,
+    RentHistory,
+    PaymentStatus,
+    PaymentType,
+)
 from ..config.database import get_database_url, get_migrations_dir
 
 # Configure logger for this module
 logger = logging.getLogger(__name__)
 
+
 class DatabaseManager:
     def __init__(self, db_url=None):
         """Initialize the database manager.
-        
+
         Args:
             db_url: Optional database URL. If not provided, uses the URL from config.
         """
         logger.debug("Initializing DatabaseManager")
         self.db_url = db_url or get_database_url()
         logger.debug(f"Database URL: {self.db_url}")
-        
+
         try:
             logger.debug("Creating SQLAlchemy engine...")
             # Disable SQL echo in production, can be enabled via environment variable if needed
-            echo_sql = os.getenv('SQL_ECHO', 'false').lower() == 'true'
+            echo_sql = os.getenv("SQL_ECHO", "false").lower() == "true"
             self.engine = create_engine(self.db_url, echo=echo_sql)
             logger.debug("Engine created successfully")
-            
+
             logger.debug("Creating session maker...")
             self.Session = sessionmaker(bind=self.engine)
             logger.debug("Session maker created successfully")
-            
+
             # Initialize the database schema if needed
             logger.debug("Initializing database...")
             self.initialize_database()
             logger.debug("Database initialization complete")
-            
+
         except Exception as e:
             logger.error(f"Error initializing database: {str(e)}")
             logger.error(f"Database URL was: {self.db_url}")
             raise
-    
+
     def initialize_database(self):
         """Initialize the database by creating all tables."""
         logger.debug("Creating database tables...")
         try:
             Base.metadata.create_all(self.engine)
             logger.debug("Database tables created successfully")
-            
+
             # Verify the database file was created
-            if 'sqlite' in self.db_url:
-                db_path = self.db_url.replace('sqlite:///', '')
+            if "sqlite" in self.db_url:
+                db_path = self.db_url.replace("sqlite:///", "")
                 logger.debug(f"Checking if database file exists at: {db_path}")
                 if os.path.exists(db_path):
                     logger.debug("Database file exists")
@@ -75,86 +84,102 @@ class DatabaseManager:
 
     def get_tenants_count(self, search_term=None, include_deleted=False):
         """Get the total count of tenants, optionally filtered by search term"""
-        logger.debug(f"Getting tenants count with search_term='{search_term}', include_deleted={include_deleted}")
-        
+        logger.debug(
+            f"Getting tenants count with search_term='{search_term}', include_deleted={include_deleted}"
+        )
+
         with self.Session() as session:
             try:
                 if include_deleted:
                     query = session.query(func.count(Tenant.id))
                 else:
-                    query = session.query(func.count(Tenant.id)).filter(Tenant.is_active == True)
-                
+                    query = session.query(func.count(Tenant.id)).filter(
+                        Tenant.is_active == True
+                    )
+
                 if search_term and search_term.strip():
                     search = f"%{search_term}%"
                     query = query.filter(Tenant.name.ilike(search))
-                
+
                 count = query.scalar() or 0
                 logger.debug(f"Found {count} tenants matching criteria")
                 return count
-                
+
             except Exception as e:
                 logger.error(f"Error getting tenant count: {str(e)}")
                 import traceback
+
                 traceback.print_exc()
                 return 0
-    
-    def get_tenants_paginated(self, offset=0, limit=20, search_term=None, include_deleted=False):
+
+    def get_tenants_paginated(
+        self, offset=0, limit=20, search_term=None, include_deleted=False
+    ):
         """Get a paginated list of tenants"""
-        logger.debug(f"Getting paginated tenants: offset={offset}, limit={limit}, search_term='{search_term}', include_deleted={include_deleted}")
-        
+        logger.debug(
+            f"Getting paginated tenants: offset={offset}, limit={limit}, search_term='{search_term}', include_deleted={include_deleted}"
+        )
+
         with self.Session() as session:
             try:
                 if include_deleted:
                     query = session.query(Tenant)
                 else:
                     query = session.query(Tenant).filter(Tenant.is_active == True)
-                
+
                 if search_term and search_term.strip():
                     search = f"%{search_term}%"
                     query = query.filter(Tenant.name.ilike(search))
-                
+
                 tenants = query.order_by(Tenant.name).offset(offset).limit(limit).all()
                 logger.debug(f"Retrieved {len(tenants)} tenants")
-                
+
                 # Print first few tenants for debugging
                 max_print = min(3, len(tenants))
                 for i in range(max_print):
                     logger.debug(f"  {i+1}. {tenants[i].name} (ID: {tenants[i].id})")
                 if len(tenants) > max_print:
                     logger.debug(f"  ... and {len(tenants) - max_print} more")
-                
+
                 return tenants
-                
+
             except Exception as e:
                 logger.error(f"Error getting paginated tenants: {str(e)}")
                 import traceback
+
                 traceback.print_exc()
                 return []
-    
-    def get_tenants(self, page=1, per_page=20, search_term=None, include_inactive=False):
+
+    def get_tenants(
+        self, page=1, per_page=20, search_term=None, include_inactive=False
+    ):
         """Get paginated list of tenants from the database (legacy method)"""
-        logger.debug(f"Getting tenants: page={page}, per_page={per_page}, search_term='{search_term}', include_inactive={include_inactive}")
-        
+        logger.debug(
+            f"Getting tenants: page={page}, per_page={per_page}, search_term='{search_term}', include_inactive={include_inactive}"
+        )
+
         # Get the total count
         total = self.get_tenants_count(search_term, include_inactive)
-        
+
         # Get paginated results
         offset = (page - 1) * per_page
-        tenants = self.get_tenants_paginated(offset, per_page, search_term, include_inactive)
-        
+        tenants = self.get_tenants_paginated(
+            offset, per_page, search_term, include_inactive
+        )
+
         return tenants, total
-    
+
     def get_session(self):
         return self.Session()
-        
+
     def delete_tenant(self, tenant_id, hard_delete=False):
         """Delete a tenant, with option for hard or soft delete.
-        
+
         Args:
             tenant_id (int): The ID of the tenant to delete
-            hard_delete (bool): If True, permanently delete the tenant. 
+            hard_delete (bool): If True, permanently delete the tenant.
                              If False (default), perform a soft delete.
-            
+
         Returns:
             bool: True if the tenant was successfully deleted, False otherwise
         """
@@ -165,7 +190,7 @@ class DatabaseManager:
                 if not tenant:
                     logger.warning(f"No tenant found with ID {tenant_id} for deletion")
                     return False
-                
+
                 if hard_delete:
                     # Hard delete - remove the tenant completely
                     session.delete(tenant)
@@ -174,22 +199,22 @@ class DatabaseManager:
                     # Soft delete - mark as inactive
                     tenant.soft_delete()
                     action = "soft-deleted"
-                
+
                 session.commit()
                 logger.info(f"Successfully {action} tenant ID {tenant_id}")
                 return True
-                
+
             except Exception as e:
                 session.rollback()
                 logger.exception(f"Error deleting tenant ID {tenant_id}")
                 return False
-                
+
     def restore_tenant(self, tenant_id):
         """Restore a soft-deleted tenant.
-        
+
         Args:
             tenant_id (int): The ID of the tenant to restore
-            
+
         Returns:
             bool: True if the tenant was successfully restored, False otherwise
         """
@@ -198,31 +223,41 @@ class DatabaseManager:
                 # Get the tenant, including soft-deleted ones
                 tenant = session.query(Tenant).filter_by(id=tenant_id).first()
                 if not tenant:
-                    logger.warning(f"No tenant found with ID {tenant_id} for restoration")
+                    logger.warning(
+                        f"No tenant found with ID {tenant_id} for restoration"
+                    )
                     return False
-                    
+
                 # Restore the tenant
                 tenant.restore()
                 session.commit()
                 logger.info(f"Successfully restored tenant ID {tenant_id}")
                 return True
-                
+
             except Exception as e:
                 session.rollback()
                 logger.exception(f"Error restoring tenant ID {tenant_id}")
                 return False
-        
-    def record_payment(self, tenant_id, amount, payment_date=None, payment_type=PaymentType.RENT, 
-                       reference_month=None, description=None, status=PaymentStatus.COMPLETED):
+
+    def record_payment(
+        self,
+        tenant_id,
+        amount,
+        payment_date=None,
+        payment_type=PaymentType.RENT,
+        reference_month=None,
+        description=None,
+        status=PaymentStatus.COMPLETED,
+    ):
         """Record a payment for a tenant"""
         if payment_date is None:
             payment_date = datetime.utcnow()
-            
+
         if reference_month is None:
             reference_month = date.today().replace(day=1)
         elif isinstance(reference_month, date):
             reference_month = reference_month.replace(day=1)
-            
+
         payment = Payment(
             tenant_id=tenant_id,
             amount=amount,
@@ -230,9 +265,9 @@ class DatabaseManager:
             payment_type=payment_type,
             reference_month=reference_month,
             description=description,
-            status=status
+            status=status,
         )
-        
+
         with self.Session() as session:
             try:
                 session.add(payment)
@@ -242,11 +277,20 @@ class DatabaseManager:
                 session.rollback()
                 logger.error(f"Error recording payment: {str(e)}")
                 return None
-    
-    def get_tenant_payments(self, tenant_id, start_date=None, end_date=None, reference_month=None, 
-                       page=1, per_page=20, search_term=None, include_expected=True):
+
+    def get_tenant_payments(
+        self,
+        tenant_id,
+        start_date=None,
+        end_date=None,
+        reference_month=None,
+        page=1,
+        per_page=20,
+        search_term=None,
+        include_expected=True,
+    ):
         """Get paginated payments for a tenant with optional filters
-        
+
         Args:
             tenant_id (int): ID of the tenant
             start_date (date, optional): Filter payments after this date
@@ -256,14 +300,14 @@ class DatabaseManager:
             per_page (int): Number of items per page
             search_term (str, optional): Optional search term to filter payments by description
             include_expected (bool): Whether to include expected rent entries for months without payments
-            
+
         Returns:
             tuple: (list_of_payments, total_count)
         """
         with self.Session() as session:
             # Base query for actual payments
             query = session.query(Payment).filter(Payment.tenant_id == tenant_id)
-            
+
             # Apply date filters to actual payments
             if start_date:
                 query = query.filter(Payment.payment_date >= start_date)
@@ -274,9 +318,10 @@ class DatabaseManager:
             if reference_month:
                 # If reference_month is provided, filter payments for that specific month
                 query = query.filter(
-                    func.strftime('%Y-%m', Payment.reference_month) == reference_month.strftime('%Y-%m')
+                    func.strftime("%Y-%m", Payment.reference_month)
+                    == reference_month.strftime("%Y-%m")
                 )
-            
+
             # Apply search term if provided
             if search_term and search_term.strip():
                 search = f"%{search_term.strip()}%"
@@ -284,51 +329,55 @@ class DatabaseManager:
                     or_(
                         Payment.description.ilike(search),
                         Payment.payment_type.ilike(search),
-                        Payment.status.ilike(search)
+                        Payment.status.ilike(search),
                     )
                 )
-            
+
             # Get actual payments
             actual_payments = query.order_by(Payment.payment_date.desc()).all()
-            payments = list(actual_payments)  # Create a copy to avoid modifying the original
-            
+            payments = list(
+                actual_payments
+            )  # Create a copy to avoid modifying the original
+
             # If we should include expected rent entries
             if include_expected and (start_date and end_date) and not reference_month:
                 # Get expected rent entries for the date range
-                expected_entries = self.get_expected_rent_entries(tenant_id, start_date, end_date)
-                
+                expected_entries = self.get_expected_rent_entries(
+                    tenant_id, start_date, end_date
+                )
+
                 # Convert actual payments to dict format for easier comparison
                 actual_payments_dict = {}
                 for payment in actual_payments:
                     if payment.reference_month:
-                        month_key = payment.reference_month.strftime('%Y-%m')
+                        month_key = payment.reference_month.strftime("%Y-%m")
                         actual_payments_dict[month_key] = payment
-                
+
                 # Add expected entries for months without actual payments
                 for entry in expected_entries:
-                    month_key = entry['reference_month'].strftime('%Y-%m')
+                    month_key = entry["reference_month"].strftime("%Y-%m")
                     if month_key not in actual_payments_dict:
                         # Create a Payment-like object for the expected entry
-                        payment = type('Payment', (), entry)
+                        payment = type("Payment", (), entry)
                         payments.append(payment)
-                
+
                 # Sort all payments by reference month in descending order (newest first)
                 payments.sort(
                     key=lambda p: (
-                        getattr(p, 'reference_month', None) or 
-                        getattr(p, 'payment_date', None) or 
-                        datetime.min
+                        getattr(p, "reference_month", None)
+                        or getattr(p, "payment_date", None)
+                        or datetime.min
                     ),
-                    reverse=True
+                    reverse=True,
                 )
-            
+
             # Apply pagination
             total = len(payments)
             offset = (page - 1) * per_page
-            paginated_payments = payments[offset:offset + per_page]
-            
+            paginated_payments = payments[offset : offset + per_page]
+
             return paginated_payments, total
-            
+
     def get_expected_rent_entries(self, tenant_id, start_date, end_date):
         """Generate expected rent entries for a tenant between two dates"""
         with self.Session() as session:
@@ -336,125 +385,174 @@ class DatabaseManager:
             tenant = session.query(Tenant).get(tenant_id)
             if not tenant:
                 return []
-                
+
             # Get all rent history records in chronological order
             history = sorted(tenant.rent_history, key=lambda x: x.valid_from)
-            
+
             # If no rent history, use current rent
             if not history:
-                entry_date = tenant.entry_date.date() if hasattr(tenant.entry_date, 'date') else tenant.entry_date
-                history = [type('obj', (object,), {'valid_from': entry_date or datetime.min, 'amount': tenant.rent})]
-            
+                entry_date = (
+                    tenant.entry_date.date()
+                    if hasattr(tenant.entry_date, "date")
+                    else tenant.entry_date
+                )
+                history = [
+                    type(
+                        "obj",
+                        (object,),
+                        {
+                            "valid_from": entry_date or datetime.min,
+                            "amount": tenant.rent,
+                        },
+                    )
+                ]
+
             # Generate expected rent for each month in the date range
             expected_entries = []
-            current_date = max(start_date, tenant.entry_date.date() if hasattr(tenant.entry_date, 'date') else tenant.entry_date)
-            
+            current_date = max(
+                start_date,
+                (
+                    tenant.entry_date.date()
+                    if hasattr(tenant.entry_date, "date")
+                    else tenant.entry_date
+                ),
+            )
+
             # Ensure end_date is a date object
-            if hasattr(end_date, 'date'):
+            if hasattr(end_date, "date"):
                 end_date = end_date.date()
-            
+
             while current_date <= end_date:
                 # Find the applicable rent for the current date
                 applicable_rent = tenant.rent  # Default to current rent
-                
+
                 for record in history:
-                    valid_from = record.valid_from.date() if hasattr(record.valid_from, 'date') else record.valid_from
+                    valid_from = (
+                        record.valid_from.date()
+                        if hasattr(record.valid_from, "date")
+                        else record.valid_from
+                    )
                     if valid_from <= current_date:
                         applicable_rent = record.amount
                     else:
                         break
-                
+
                 # Create an expected rent entry for this month if there's no actual payment
                 # Check if we have a payment for this month
-                current_month_str = current_date.strftime('%Y-%m')
-                has_payment = session.query(Payment).filter(
-                    Payment.tenant_id == tenant_id,
-                    Payment.payment_type == PaymentType.RENT,
-                    func.strftime('%Y-%m', Payment.reference_month) == current_month_str
-                ).first() is not None
-                
+                current_month_str = current_date.strftime("%Y-%m")
+                has_payment = (
+                    session.query(Payment)
+                    .filter(
+                        Payment.tenant_id == tenant_id,
+                        Payment.payment_type == PaymentType.RENT,
+                        func.strftime("%Y-%m", Payment.reference_month)
+                        == current_month_str,
+                    )
+                    .first()
+                    is not None
+                )
+
                 if not has_payment and applicable_rent > 0:
                     # Create a date object for the first day of the month
                     month_date = current_date.replace(day=1)
-                    if hasattr(month_date, 'date'):
+                    if hasattr(month_date, "date"):
                         month_date = month_date.date()
-                    
-                    expected_entries.append({
-                        'id': None,
-                        'tenant_id': tenant_id,
-                        'payment_date': None,
-                        'amount': float(applicable_rent),  # Ensure it's a float
-                        'payment_type': PaymentType.RENT,
-                        'reference_month': month_date,
-                        'description': f'Renda esperada para {current_date.strftime("%B %Y")}',
-                        'status': 'EXPECTED',
-                        'is_expected': True,
-                        'created_at': datetime.now(),
-                        'updated_at': datetime.now()
-                    })
-                
+
+                    expected_entries.append(
+                        {
+                            "id": None,
+                            "tenant_id": tenant_id,
+                            "payment_date": None,
+                            "amount": float(applicable_rent),  # Ensure it's a float
+                            "payment_type": PaymentType.RENT,
+                            "reference_month": month_date,
+                            "description": f'Renda esperada para {current_date.strftime("%B %Y")}',
+                            "status": "EXPECTED",
+                            "is_expected": True,
+                            "created_at": datetime.now(),
+                            "updated_at": datetime.now(),
+                        }
+                    )
+
                 # Move to the first day of the next month
                 try:
                     if current_date.month == 12:
-                        current_date = current_date.replace(year=current_date.year + 1, month=1, day=1)
+                        current_date = current_date.replace(
+                            year=current_date.year + 1, month=1, day=1
+                        )
                     else:
-                        current_date = current_date.replace(month=current_date.month + 1, day=1)
-                    
+                        current_date = current_date.replace(
+                            month=current_date.month + 1, day=1
+                        )
+
                     # Ensure current_date is a date object for the next iteration
-                    if hasattr(current_date, 'date') and not isinstance(current_date, datetime.date):
+                    if hasattr(current_date, "date") and not isinstance(
+                        current_date, datetime.date
+                    ):
                         current_date = current_date.date()
                 except ValueError as e:
                     # Handle invalid date (e.g., Feb 30)
                     if current_date.month == 12:
-                        current_date = current_date.replace(year=current_date.year + 1, month=1, day=1)
+                        current_date = current_date.replace(
+                            year=current_date.year + 1, month=1, day=1
+                        )
                     else:
-                        current_date = current_date.replace(month=current_date.month + 2, day=1)
-                    if hasattr(current_date, 'date'):
+                        current_date = current_date.replace(
+                            month=current_date.month + 2, day=1
+                        )
+                    if hasattr(current_date, "date"):
                         current_date = current_date.date()
-            
+
             return expected_entries
 
     def get_total_rent_collected(self, reference_month=None):
         """Get total rent collected for a specific month"""
         if reference_month is None:
             reference_month = datetime.utcnow()
-            
+
         with self.Session() as session:
-            total = session.query(
-                func.sum(Payment.amount)
-            ).filter(
-                Payment.payment_type == PaymentType.RENT,
-                Payment.status == PaymentStatus.COMPLETED,
-                func.strftime('%Y-%m', Payment.reference_month) == reference_month.strftime('%Y-%m')
-            ).scalar()
-            
+            total = (
+                session.query(func.sum(Payment.amount))
+                .filter(
+                    Payment.payment_type == PaymentType.RENT,
+                    Payment.status == PaymentStatus.COMPLETED,
+                    func.strftime("%Y-%m", Payment.reference_month)
+                    == reference_month.strftime("%Y-%m"),
+                )
+                .scalar()
+            )
+
             return total or 0.0
-    
+
     def get_rent_history(self, tenant_id, start_date=None, end_date=None):
         """Get rent history for a tenant within a date range"""
         with self.Session() as session:
-            query = session.query(RentHistory).filter(RentHistory.tenant_id == tenant_id)
-            
+            query = session.query(RentHistory).filter(
+                RentHistory.tenant_id == tenant_id
+            )
+
             if start_date:
                 query = query.filter(
                     or_(
                         RentHistory.valid_to >= start_date,
-                        RentHistory.valid_to.is_(None)
+                        RentHistory.valid_to.is_(None),
                     )
                 )
             if end_date:
                 query = query.filter(RentHistory.valid_from <= end_date)
-                
+
             return query.order_by(RentHistory.valid_from.desc()).all()
-    
+
     def get_tenant_balance(self, tenant_id, as_of_date=None):
         """Get the current balance (rent due - payments) for a tenant"""
         try:
             if as_of_date is None:
                 as_of_date = datetime.utcnow()
-                
-            logger.debug(f"Getting balance for tenant_id: {tenant_id}, type: {type(tenant_id)}")
-            
+
+            logger.debug(
+                f"Getting balance for tenant_id: {tenant_id}, type: {type(tenant_id)}"
+            )
+
             with self.Session() as session:
                 # Ensure tenant_id is an integer
                 try:
@@ -462,26 +560,30 @@ class DatabaseManager:
                         tenant_id = tenant_id[0]  # Take first item if it's a list
                     tenant_id = int(tenant_id)  # Ensure it's an integer
                 except (ValueError, TypeError) as e:
-                    logger.error(f"Error converting tenant_id to int: {e}, type: {type(tenant_id)}")
+                    logger.error(
+                        f"Error converting tenant_id to int: {e}, type: {type(tenant_id)}"
+                    )
                     return 0.0
-                
+
                 tenant = session.query(Tenant).get(tenant_id)
                 if not tenant:
                     logger.debug(f"No tenant found with id: {tenant_id}")
                     return 0.0
-                logger.debug(f"Found tenant: ID={tenant.id}, Name={getattr(tenant, 'name', 'N/A')}")
+                logger.debug(
+                    f"Found tenant: ID={tenant.id}, Name={getattr(tenant, 'name', 'N/A')}"
+                )
                 return tenant.get_balance(as_of_date)
-                
+
         except Exception as e:
             logger.error(f"Error in get_tenant_balance: {str(e)}")
             logger.exception("Exception in get_tenant_balance")
             return 0.0
-    
+
     def get_total_debt(self, as_of_date=None):
         """Calculate the total debt across all tenants (sum of positive balances)"""
         if as_of_date is None:
             as_of_date = datetime.utcnow()
-            
+
         total_debt = 0.0
         with self.Session() as session:
             tenants = session.query(Tenant).all()
@@ -490,71 +592,81 @@ class DatabaseManager:
                 if balance > 0:  # Only count positive balances (debts)
                     total_debt += balance
         return total_debt
-    
+
     def generate_rent_statement(self, tenant_id, start_date, end_date=None):
         """Generate a rent statement for a tenant"""
         if end_date is None:
             end_date = datetime.utcnow()
-            
+
         with self.Session() as session:
             tenant = session.query(Tenant).get(tenant_id)
             if not tenant:
                 return None
-                
+
             # Get all rent periods in the date range
             rent_periods = [
-                period for period in tenant._get_rent_periods(end_date)
-                if start_date <= period['date'] <= end_date
+                period
+                for period in tenant._get_rent_periods(end_date)
+                if start_date <= period["date"] <= end_date
             ]
-            
+
             # Get all payments in the date range
             payments = [
-                payment for payment in tenant.payments
+                payment
+                for payment in tenant.payments
                 if start_date <= payment.payment_date <= end_date
             ]
-            
+
             # Calculate running balance
             running_balance = 0
             statement = {
-                'tenant': tenant,
-                'start_date': start_date,
-                'end_date': end_date,
-                'rent_charges': [],
-                'payments': [],
-                'opening_balance': 0,
-                'closing_balance': 0,
-                'total_rent_due': 0,
-                'total_payments': 0
+                "tenant": tenant,
+                "start_date": start_date,
+                "end_date": end_date,
+                "rent_charges": [],
+                "payments": [],
+                "opening_balance": 0,
+                "closing_balance": 0,
+                "total_rent_due": 0,
+                "total_payments": 0,
             }
-            
+
             # Calculate opening balance (balance before start_date)
-            statement['opening_balance'] = tenant.get_balance(start_date)
-            running_balance = statement['opening_balance']
-            
+            statement["opening_balance"] = tenant.get_balance(start_date)
+            running_balance = statement["opening_balance"]
+
             # Add rent charges
             for period in rent_periods:
-                statement['total_rent_due'] += period['amount']
-                running_balance += period['amount']
-                statement['rent_charges'].append({
-                    'date': period['date'],
-                    'amount': period['amount'],
-                    'balance': running_balance,
-                    'type': 'rent'
-                })
-            
+                statement["total_rent_due"] += period["amount"]
+                running_balance += period["amount"]
+                statement["rent_charges"].append(
+                    {
+                        "date": period["date"],
+                        "amount": period["amount"],
+                        "balance": running_balance,
+                        "type": "rent",
+                    }
+                )
+
             # Add payments
             for payment in payments:
                 if payment.status == PaymentStatus.COMPLETED:
-                    statement['total_payments'] += payment.amount
+                    statement["total_payments"] += payment.amount
                     running_balance -= payment.amount
-                    statement['payments'].append({
-                        'date': payment.payment_date,
-                        'amount': -payment.amount,  # Negative because it reduces the balance
-                        'balance': running_balance,
-                        'type': 'payment',
-                        'reference': payment.reference_month.strftime('%Y-%m') if payment.reference_month else '',
-                        'description': payment.description or ''
-                    })
-            
-            statement['closing_balance'] = running_balance
+                    statement["payments"].append(
+                        {
+                            "date": payment.payment_date,
+                            "amount": -payment.amount,  # Negative because it reduces the balance
+                            "balance": running_balance,
+                            "type": "payment",
+                            "reference": (
+                                payment.reference_month.strftime("%Y-%m")
+                                if payment.reference_month
+                                else ""
+                            ),
+                            "description": payment.description or "",
+                        }
+                    )
+
+            statement["closing_balance"] = running_balance
             return statement
