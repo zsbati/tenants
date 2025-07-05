@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (QMainWindow, QTabWidget, QPushButton, QVBoxLayout, 
                              QHeaderView, QDateEdit, QFrame, QLineEdit, QCheckBox)
 from PyQt6.QtCore import Qt, QDate, QLocale
 from PyQt6.QtGui import QAction
-import locale
+
 import sys
 import os
 import logging
@@ -12,9 +12,7 @@ import logging
 # Configure logger for this module
 logger = logging.getLogger(__name__)
 
-# Set Portuguese locale for date formatting
-locale.setlocale(locale.LC_TIME, 'pt_PT.UTF-8')  # For Linux/Unix
-# locale.setlocale(locale.LC_TIME, 'Portuguese_Portugal.1252')  # For Windows
+# Using system default locale for date formatting
 
 # Add project root to Python path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

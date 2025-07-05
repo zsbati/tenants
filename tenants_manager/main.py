@@ -6,7 +6,7 @@ from datetime import datetime
 
 # Import Qt modules at the top level
 from PyQt6.QtWidgets import QApplication, QMessageBox
-from PyQt6.QtCore import QTranslator, Qt
+from PyQt6.QtCore import Qt
 
 def configure_logging():
     """Configure logging with appropriate levels and handlers.
@@ -122,16 +122,7 @@ def main():
             app.setOrganizationName("Tenants Manager")
             logger.info("Application metadata set")
             
-            # Try to load translations
-            try:
-                translator = QTranslator()
-                if translator.load("pt", "i18n", ".qm"):
-                    app.installTranslator(translator)
-                    logger.info("Portuguese translator loaded")
-                else:
-                    logger.warning("Failed to load Portuguese translator")
-            except Exception as e:
-                logger.error(f"Error loading translator: {e}", exc_info=True)
+            # Translation support has been removed as requested
         else:
             logger.info("Using existing QApplication instance")
             
