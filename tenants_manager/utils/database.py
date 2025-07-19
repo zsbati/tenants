@@ -122,10 +122,12 @@ class DatabaseManager:
 
         with self.Session() as session:
             try:
-                if include_deleted:
-                    query = session.query(Tenant)
-                else:
-                    query = session.query(Tenant).filter(Tenant.is_active == True)
+                from sqlalchemy.orm import joinedload
+                
+                query = session.query(Tenant).options(joinedload(Tenant.room_ref))
+                
+                if not include_deleted:
+                    query = query.filter(Tenant.is_active == True)
 
                 if search_term and search_term.strip():
                     search = f"%{search_term}%"
@@ -153,7 +155,17 @@ class DatabaseManager:
     def get_tenants(
         self, page=1, per_page=20, search_term=None, include_inactive=False
     ):
-        """Get paginated list of tenants from the database (legacy method)"""
+        """Get paginated list of tenants from the database (legacy method)
+        
+        Args:
+            page: Page number (1-based)
+            per_page: Number of items per page
+            search_term: Optional search term to filter tenants by name
+            include_inactive: If True, include soft-deleted tenants
+            
+        Returns:
+            tuple: (list_of_tenants, total_count)
+        """
         logger.debug(
             f"Getting tenants: page={page}, per_page={per_page}, search_term='{search_term}', include_inactive={include_inactive}"
         )
@@ -164,7 +176,7 @@ class DatabaseManager:
         # Get paginated results
         offset = (page - 1) * per_page
         tenants = self.get_tenants_paginated(
-            offset, per_page, search_term, include_inactive
+            offset, per_page, search_term, include_deleted=include_inactive
         )
 
         return tenants, total

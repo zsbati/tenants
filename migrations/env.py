@@ -1,23 +1,29 @@
 from logging.config import fileConfig
 import os
 import sys
+from pathlib import Path
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 from alembic import context
 
 # Add project root to Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = Path(__file__).parent.parent.absolute()
+sys.path.insert(0, str(project_root))
+
+# Import the database URL function
+from tenants_manager.config.database import get_database_url
 
 # Import your models and Base
 from tenants_manager.models.tenant import Base
-from tenants_manager.utils.database import DatabaseManager
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
-# Set the database URL
-config.set_main_option('sqlalchemy.url', 'sqlite:///tenants_manager/tenants.db')
+# Set the database URL from our application's configuration
+db_url = get_database_url()
+config.set_main_option('sqlalchemy.url', db_url)
+print(f"Using database URL: {db_url}")
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

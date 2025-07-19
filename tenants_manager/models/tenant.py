@@ -87,13 +87,40 @@ class RentHistory(Base):
     tenant = relationship("Tenant", back_populates="rent_history")
 
 
+class Room(Base):
+    __tablename__ = "rooms"
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(50), unique=True, nullable=False, comment="Room identifier (e.g., 'Quarto 101')")
+    capacity = Column(Integer, default=4, nullable=False, comment="Maximum number of tenants allowed in the room (1-4)")
+    description = Column(String(200), nullable=True, comment="Optional description or notes about the room")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationship with tenants (one-to-many)
+    tenants = relationship("Tenant", back_populates="room_ref", cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<Room(id={self.id}, name='{self.name}', capacity={self.capacity})>"
+    
+    @property
+    def current_occupancy(self):
+        """Return the current number of active tenants in the room"""
+        return len([t for t in self.tenants if t.is_active])
+    
+    @property
+    def is_full(self):
+        """Check if the room has reached its capacity"""
+        return self.current_occupancy >= self.capacity
+
+
 class Tenant(Base):
     __tablename__ = "tenants"
 
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)
-    room = Column(String(50), nullable=False)
-    rent = Column(Float, nullable=False)  # Current rent amount
+    room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False, comment="References the room this tenant is assigned to")
+    rent = Column(Float, nullable=False)
     bi = Column(String(20), unique=True, nullable=False)
     email = Column(String(100), nullable=True)
     phone = Column(String(20), nullable=True)
@@ -106,15 +133,16 @@ class Tenant(Base):
     deleted_at = Column(DateTime, nullable=True)
 
     # Relationships
+    room_ref = relationship("Room", back_populates="tenants", foreign_keys=[room_id])
     contracts = relationship("Contract", back_populates="tenant")
     emergency_contact = relationship(
-        "EmergencyContact", back_populates="tenant", uselist=False
+        "EmergencyContact", back_populates="tenant", uselist=False, cascade="all, delete-orphan"
     )
     payments = relationship(
-        "Payment", back_populates="tenant", order_by="Payment.payment_date.desc()"
+        "Payment", back_populates="tenant", order_by="Payment.payment_date.desc()", cascade="all, delete-orphan"
     )
     rent_history = relationship(
-        "RentHistory", back_populates="tenant", order_by="RentHistory.valid_from.desc()"
+        "RentHistory", back_populates="tenant", order_by="RentHistory.valid_from.desc()", cascade="all, delete-orphan"
     )
 
     def soft_delete(self):

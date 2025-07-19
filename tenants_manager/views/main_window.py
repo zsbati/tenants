@@ -19,6 +19,9 @@ from PyQt6.QtWidgets import (
     QFrame,
     QLineEdit,
     QCheckBox,
+    QInputDialog,
+    QSplitter,
+    QGroupBox,
 )
 from PyQt6.QtCore import Qt, QDate, QLocale
 from PyQt6.QtGui import QAction
@@ -41,7 +44,7 @@ if project_root not in sys.path:
 
 from tenants_manager.views.tenant_dialog import TenantDialog
 from tenants_manager.views.payment_history_window import PaymentHistoryWindow
-from tenants_manager.models.tenant import Tenant, PaymentType, PaymentStatus
+from tenants_manager.models.tenant import Tenant, PaymentType, PaymentStatus, Room
 from tenants_manager.utils.database import DatabaseManager
 
 
@@ -102,6 +105,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.create_tenants_tab(), "Inquilinos")
         self.tabs.addTab(self.create_contracts_tab(), "Contratos")
         self.tabs.addTab(self.create_payments_tab(), "Pagamentos")
+        self.tabs.addTab(self.create_rooms_tab(), "Quartos")
 
         layout.addWidget(self.tabs)
 
@@ -115,7 +119,344 @@ class MainWindow(QMainWindow):
         separator.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(separator)
 
+    def create_rooms_tab(self):
+        """Create the rooms management tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # Top button layout
+        top_controls = QHBoxLayout()
+        
+        # Add Room button
+        add_room_btn = QPushButton("Adicionar Quarto")
+        add_room_btn.clicked.connect(self.add_room)
+        top_controls.addWidget(add_room_btn)
+        
+        # Add spacer to push buttons to the right
+        top_controls.addStretch()
+        
+        # Search bar
+        search_layout = QHBoxLayout()
+        self.room_search_input = QLineEdit()
+        self.room_search_input.setPlaceholderText("Pesquisar quarto...")
+        self.room_search_input.textChanged.connect(self.load_rooms)
+        search_layout.addWidget(self.room_search_input)
+        
+        top_controls.addLayout(search_layout)
+        layout.addLayout(top_controls)
+
+        # Splitter for rooms list and tenants view
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        
+        # Top part - Rooms table
+        rooms_widget = QWidget()
+        rooms_layout = QVBoxLayout(rooms_widget)
+        
+        # Rooms table
+        self.rooms_table = QTableWidget()
+        self.rooms_table.setColumnCount(4)
+        self.rooms_table.setHorizontalHeaderLabels(["ID", "Nome", "Capacidade", "Ocupação"])
+        self.rooms_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.rooms_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.rooms_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.rooms_table.doubleClicked.connect(self.edit_room)
+        self.rooms_table.itemSelectionChanged.connect(self.load_room_tenants)
+        
+        # Set column widths
+        self.rooms_table.setColumnWidth(0, 50)  # ID
+        self.rooms_table.setColumnWidth(1, 200)  # Name
+        self.rooms_table.setColumnWidth(2, 100)  # Capacity
+        self.rooms_table.setColumnWidth(3, 100)  # Occupancy
+        
+        # Enable context menu
+        self.rooms_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.rooms_table.customContextMenuRequested.connect(self.show_room_context_menu)
+        
+        rooms_layout.addWidget(self.rooms_table)
+        
+        # Bottom part - Tenants in selected room
+        tenants_group = QGroupBox("Inquilinos no Quarto Selecionado")
+        tenants_layout = QVBoxLayout()
+        
+        # Tenants table
+        self.room_tenants_table = QTableWidget()
+        self.room_tenants_table.setColumnCount(3)
+        self.room_tenants_table.setHorizontalHeaderLabels(["Nome", "BI", "Telefone"])
+        self.room_tenants_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.room_tenants_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.room_tenants_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        
+        # Set column widths
+        self.room_tenants_table.setColumnWidth(0, 200)  # Name
+        self.room_tenants_table.setColumnWidth(1, 150)  # BI
+        self.room_tenants_table.setColumnWidth(2, 150)  # Phone
+        
+        # Add tenants table to layout
+        tenants_layout.addWidget(self.room_tenants_table)
+        tenants_group.setLayout(tenants_layout)
+        
+        # Add widgets to splitter
+        splitter.addWidget(rooms_widget)
+        splitter.addWidget(tenants_group)
+        splitter.setSizes([300, 200])  # Initial sizes for the splitter
+        
+        # Add splitter to main layout
+        layout.addWidget(splitter)
+        
+        # Load rooms data
+        self.load_rooms()
+        
+        return widget
+        
+    def show_room_context_menu(self, position):
+        """Show context menu for room row"""
+        menu = QMenu()
+        
+        edit_action = QAction("Editar Quarto", self)
+        edit_action.triggered.connect(self.edit_room)
+        menu.addAction(edit_action)
+        
+        delete_action = QAction("Remover Quarto", self)
+        delete_action.triggered.connect(self.delete_room)
+        menu.addAction(delete_action)
+        
+        menu.exec(self.rooms_table.viewport().mapToGlobal(position))
+    
+    def add_room(self):
+        """Add a new room"""
+        from tenants_manager.models.tenant import Room
+        
+        name, ok = QInputDialog.getText(self, "Novo Quarto", "Nome do Quarto:")
+        if not ok or not name.strip():
+            return
+            
+        capacity, ok = QInputDialog.getInt(
+            self, 
+            "Capacidade do Quarto", 
+            "Número máximo de inquilinos (1-4):", 
+            min=1, 
+            max=4, 
+            value=4
+        )
+        
+        if not ok:
+            return
+            
+        try:
+            room = Room(name=name.strip(), capacity=capacity)
+            self.session.add(room)
+            self.session.commit()
+            self.load_rooms()
+            QMessageBox.information(self, "Sucesso", "Quarto adicionado com sucesso!")
+        except Exception as e:
+            self.session.rollback()
+            logger.error(f"Error adding room: {str(e)}")
+            QMessageBox.critical(self, "Erro", f"Erro ao adicionar quarto: {str(e)}")
+    
+    def edit_room(self):
+        """Edit selected room"""
+        selected = self.rooms_table.currentRow()
+        if selected < 0:
+            return
+            
+        room_id = int(self.rooms_table.item(selected, 0).text())
+        room = self.session.get(Room, room_id)
+        
+        if not room:
+            QMessageBox.warning(self, "Aviso", "Quarto não encontrado!")
+            return
+            
+        name, ok = QInputDialog.getText(
+            self, 
+            "Editar Quarto", 
+            "Nome do Quarto:", 
+            text=room.name
+        )
+        
+        if not ok or not name.strip():
+            return
+            
+        capacity, ok = QInputDialog.getInt(
+            self, 
+            "Capacidade do Quarto", 
+            "Número máximo de inquilinos (1-4):", 
+            min=1, 
+            max=4, 
+            value=room.capacity
+        )
+        
+        if not ok:
+            return
+            
+        try:
+            room.name = name.strip()
+            room.capacity = capacity
+            self.session.commit()
+            self.load_rooms()
+            QMessageBox.information(self, "Sucesso", "Quarto atualizado com sucesso!")
+        except Exception as e:
+            self.session.rollback()
+            logger.error(f"Error updating room: {str(e)}")
+            QMessageBox.critical(self, "Erro", f"Erro ao atualizar quarto: {str(e)}")
+    
+    def delete_room(self):
+        """Delete selected room"""
+        selected = self.rooms_table.currentRow()
+        if selected < 0:
+            return
+            
+        room_id = int(self.rooms_table.item(selected, 0).text())
+        room = self.session.get(Room, room_id)
+        
+        if not room:
+            QMessageBox.warning(self, "Aviso", "Quarto não encontrado!")
+            return
+            
+        # Check if room has tenants
+        if room.tenants:
+            QMessageBox.warning(
+                self, 
+                "Aviso", 
+                "Não é possível remover um quarto que tem inquilinos!\n"
+                "Por favor, remova ou realoque os inquilinos primeiro."
+            )
+            return
+            
+        reply = QMessageBox.question(
+            self,
+            "Confirmar Remoção",
+            f"Tem certeza que deseja remover o quarto '{room.name}'?\n"
+            "Esta ação não pode ser desfeita.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self.session.delete(room)
+                self.session.commit()
+                self.load_rooms()
+                QMessageBox.information(self, "Sucesso", "Quarto removido com sucesso!")
+            except Exception as e:
+                self.session.rollback()
+                logger.error(f"Error deleting room: {str(e)}")
+                QMessageBox.critical(self, "Erro", f"Erro ao remover quarto: {str(e)}")
+    
+    def load_rooms(self):
+        """Load rooms from the database"""
+        try:
+            from tenants_manager.models.tenant import Room
+            
+            # Get search term
+            search_term = self.room_search_input.text().strip().lower()
+            
+            # Query rooms
+            query = self.session.query(Room)
+            
+            # Apply search filter
+            if search_term:
+                query = query.filter(Room.name.ilike(f"%{search_term}%"))
+            
+            # Order by name
+            query = query.order_by(Room.name)
+            
+            rooms = query.all()
+            
+            # Store current selection
+            current_selection = None
+            if self.rooms_table.currentRow() >= 0:
+                current_selection = self.rooms_table.item(self.rooms_table.currentRow(), 0).text()
+            
+            # Update table
+            self.rooms_table.setRowCount(len(rooms))
+            
+            selected_row = -1
+            for row, room in enumerate(rooms):
+                # ID
+                self.rooms_table.setItem(row, 0, QTableWidgetItem(str(room.id)))
+                
+                # Name
+                self.rooms_table.setItem(row, 1, QTableWidgetItem(room.name))
+                
+                # Capacity
+                self.rooms_table.setItem(row, 2, QTableWidgetItem(str(room.capacity)))
+                
+                # Current occupancy
+                active_tenants = [t for t in room.tenants if t.is_active]
+                occupancy = len(active_tenants)
+                occupancy_item = QTableWidgetItem(f"{occupancy}/{room.capacity}")
+                
+                # Color code based on occupancy
+                if occupancy >= room.capacity:
+                    occupancy_item.setBackground(Qt.GlobalColor.red)
+                    occupancy_item.setForeground(Qt.GlobalColor.white)
+                elif occupancy == 0:
+                    occupancy_item.setBackground(Qt.GlobalColor.green)
+                else:
+                    occupancy_item.setBackground(Qt.GlobalColor.yellow)
+                
+                self.rooms_table.setItem(row, 3, occupancy_item)
+                
+                # Check if this was the previously selected room
+                if current_selection and str(room.id) == current_selection:
+                    selected_row = row
+            
+            # Restore selection if possible
+            if selected_row >= 0:
+                self.rooms_table.selectRow(selected_row)
+            elif self.rooms_table.rowCount() > 0:
+                self.rooms_table.selectRow(0)
+            
+            # Load tenants for the selected room
+            self.load_room_tenants()
+                
+        except Exception as e:
+            logger.error(f"Error loading rooms: {str(e)}")
+            QMessageBox.critical(self, "Erro", f"Erro ao carregar quartos: {str(e)}")
+            return []
+    
+    def load_room_tenants(self):
+        """Load tenants for the currently selected room"""
+        try:
+            from tenants_manager.models.tenant import Tenant
+            
+            # Clear the table
+            self.room_tenants_table.setRowCount(0)
+            
+            # Get selected room
+            selected_row = self.rooms_table.currentRow()
+            if selected_row < 0:
+                return
+                
+            room_id = int(self.rooms_table.item(selected_row, 0).text())
+            
+            # Query active tenants for this room
+            tenants = self.session.query(Tenant).filter(
+                Tenant.room_id == room_id,
+                Tenant.is_active == True
+            ).order_by(Tenant.name).all()
+            
+            # Update table
+            self.room_tenants_table.setRowCount(len(tenants))
+            
+            for row, tenant in enumerate(tenants):
+                # Name
+                self.room_tenants_table.setItem(row, 0, QTableWidgetItem(tenant.name))
+                
+                # BI
+                bi_item = QTableWidgetItem(tenant.bi or "")
+                self.room_tenants_table.setItem(row, 1, bi_item)
+                
+                # Phone
+                phone_item = QTableWidgetItem(tenant.phone or "")
+                self.room_tenants_table.setItem(row, 2, phone_item)
+                
+        except Exception as e:
+            logger.error(f"Error loading room tenants: {str(e)}")
+            QMessageBox.critical(self, "Erro", f"Erro ao carregar inquilinos do quarto: {str(e)}")
+
     def create_tenants_tab(self):
+        """Create the tenants management tab"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
@@ -186,6 +527,10 @@ class MainWindow(QMainWindow):
 
         # Update button states when selection changes
         self.tenant_table.itemSelectionChanged.connect(self.update_action_buttons)
+
+        # Enable context menu
+        self.tenant_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tenant_table.customContextMenuRequested.connect(self.show_tenant_context_menu)
 
         # Pagination controls
         pagination_layout = QHBoxLayout()
@@ -407,96 +752,152 @@ class MainWindow(QMainWindow):
                     session.close()
 
     def edit_tenant(self):
-        # Get the selected row
-        selected_rows = self.tenant_table.selectionModel().selectedRows()
-
-        if not selected_rows:
-            QMessageBox.warning(
-                self, "Aviso", "Por favor, selecione um inquilino para editar."
-            )
-            return
-
-        # Get the selected row index
-        row = selected_rows[0].row()
-
-        # Get the tenant's BI (unique identifier) from the table
-        bi = self.tenant_table.item(row, 3).text()
-
-        session = None
         try:
-            # Get the session
-            session = self.db_manager.get_session()
+            logger.debug("Starting edit_tenant method")
+            # Get the selected row
+            selected_rows = self.tenant_table.selectionModel().selectedRows()
 
-            # Find the tenant by BI
-            tenant = session.query(Tenant).filter_by(bi=bi).first()
-
-            if not tenant:
-                QMessageBox.critical(self, "Erro", "Inquilino não encontrado!")
+            if not selected_rows:
+                QMessageBox.warning(
+                    self, "Aviso", "Por favor, selecione um inquilino para editar."
+                )
                 return
 
-            # Create and show the edit dialog with the tenant's data
-            dialog = TenantDialog(
-                tenant=tenant, parent=self, is_deleted=not tenant.is_active
-            )
+            # Get the selected row index
+            row = selected_rows[0].row()
+            logger.debug(f"Selected row: {row}")
 
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                # Get the updated tenant data
-                updated_tenant = dialog.get_tenant_data()
+            # Get the tenant's BI (unique identifier) from the table
+            bi_item = self.tenant_table.item(row, 3)
+            if not bi_item:
+                logger.error("No BI found in the selected row")
+                QMessageBox.critical(self, "Erro", "Não foi possível identificar o inquilino selecionado.")
+                return
+                
+            bi = bi_item.text()
+            logger.debug(f"Editing tenant with BI: {bi}")
 
-                if updated_tenant:
-                    # Update the tenant's properties
-                    tenant.name = updated_tenant.name
-                    tenant.room = updated_tenant.room
-                    tenant.rent = updated_tenant.rent
-                    tenant.bi = updated_tenant.bi
-                    tenant.email = updated_tenant.email
-                    tenant.phone = updated_tenant.phone
-                    tenant.address = updated_tenant.address
-                    tenant.birth_date = updated_tenant.birth_date
-                    tenant.entry_date = updated_tenant.entry_date
+            session = None
+            try:
+                # Get the session
+                session = self.db_manager.get_session()
+                logger.debug("Database session created")
 
-                    # Handle emergency contact
-                    if (
-                        hasattr(updated_tenant, "emergency_contact")
-                        and updated_tenant.emergency_contact
-                    ):
-                        if (
-                            hasattr(tenant, "emergency_contact")
-                            and tenant.emergency_contact
-                        ):
-                            # Update existing emergency contact
-                            ec = tenant.emergency_contact
-                            updated_ec = updated_tenant.emergency_contact
-                            ec.name = updated_ec.name
-                            ec.phone = updated_ec.phone
-                            ec.email = updated_ec.email
-                        else:
-                            # Add new emergency contact
-                            tenant.emergency_contact = updated_tenant.emergency_contact
-                    elif (
-                        hasattr(tenant, "emergency_contact")
-                        and tenant.emergency_contact
-                    ):
-                        # Remove existing emergency contact if it exists but was cleared
-                        session.delete(tenant.emergency_contact)
+                # Find the tenant by BI
+                tenant = session.query(Tenant).filter_by(bi=bi).first()
+                if not tenant:
+                    logger.error(f"Tenant with BI {bi} not found in database")
+                    QMessageBox.critical(self, "Erro", "Inquilino não encontrado!")
+                    return
 
-                    # Commit the changes
-                    session.commit()
+                logger.debug(f"Found tenant: {tenant.name} (ID: {tenant.id})")
 
-                    # Refresh the table
-                    self.load_tenants()
-                    self.load_payments()
-                    QMessageBox.information(
-                        self, "Sucesso", "Inquilino atualizado com sucesso!"
-                    )
+                # Create and show the edit dialog with the tenant's data
+                dialog = TenantDialog(
+                    tenant=tenant, parent=self, is_deleted=not tenant.is_active
+                )
+                logger.debug("Created TenantDialog")
+
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    logger.debug("Dialog accepted, getting tenant data...")
+                    # Get the updated tenant data
+                    tenant_data = dialog.get_tenant_data()
+                    
+                    # Debug: Log the tenant data
+                    from pprint import pformat
+                    logger.debug(f"Tenant data from dialog: {pformat(tenant_data)}")
+
+                    if not tenant_data:
+                        logger.error("No tenant data returned from dialog")
+                        QMessageBox.critical(self, "Erro", "Nenhum dado de inquilino foi retornado.")
+                        return
+
+                    try:
+                        # Update the tenant's properties
+                        logger.debug("Updating tenant properties...")
+                        if 'name' in tenant_data and tenant_data['name'] is not None:
+                            tenant.name = tenant_data['name']
+                        if 'room_id' in tenant_data and tenant_data['room_id'] is not None:
+                            tenant.room_id = tenant_data['room_id']
+                        if 'rent' in tenant_data and tenant_data['rent'] is not None:
+                            tenant.rent = tenant_data['rent']
+                        if 'bi' in tenant_data and tenant_data['bi'] is not None:
+                            tenant.bi = tenant_data['bi']
+                        if 'email' in tenant_data:
+                            tenant.email = tenant_data['email']
+                        if 'phone' in tenant_data:
+                            tenant.phone = tenant_data['phone']
+                        if 'address' in tenant_data:
+                            tenant.address = tenant_data['address']
+                        if 'birth_date' in tenant_data and tenant_data['birth_date'] is not None:
+                            tenant.birth_date = tenant_data['birth_date']
+                        if 'entry_date' in tenant_data and tenant_data['entry_date'] is not None:
+                            tenant.entry_date = tenant_data['entry_date']
+
+                        logger.debug("Tenant properties updated")
+
+                        # Handle emergency contact
+                        if 'emergency_contact' in tenant_data and tenant_data['emergency_contact']:
+                            logger.debug("Updating emergency contact...")
+                            if not tenant.emergency_contact:
+                                from tenants_manager.models.tenant import EmergencyContact
+                                tenant.emergency_contact = EmergencyContact(
+                                    name=tenant_data['emergency_contact'].get('name'),
+                                    phone=tenant_data['emergency_contact'].get('phone'),
+                                    email=tenant_data['emergency_contact'].get('email')
+                                )
+                                logger.debug("Created new emergency contact")
+                            else:
+                                if 'name' in tenant_data['emergency_contact']:
+                                    tenant.emergency_contact.name = tenant_data['emergency_contact']['name']
+                                if 'phone' in tenant_data['emergency_contact']:
+                                    tenant.emergency_contact.phone = tenant_data['emergency_contact']['phone']
+                                if 'email' in tenant_data['emergency_contact']:
+                                    tenant.emergency_contact.email = tenant_data['emergency_contact']['email']
+                                logger.debug("Updated existing emergency contact")
+                        elif tenant.emergency_contact:
+                            # Remove existing emergency contact if it exists but was cleared
+                            logger.debug("Removing emergency contact...")
+                            session.delete(tenant.emergency_contact)
+                            tenant.emergency_contact = None
+
+                        logger.debug("Committing changes to database...")
+                        session.commit()
+                        logger.debug("Changes committed successfully")
+
+                        # Refresh the table
+                        self.load_tenants()
+                        self.load_payments()
+                        
+                        logger.info("Tenant updated successfully")
+                        QMessageBox.information(
+                            self, "Sucesso", "Inquilino atualizado com sucesso!"
+                        )
+
+                    except Exception as e:
+                        logger.exception("Error updating tenant:")
+                        if session:
+                            session.rollback()
+                        QMessageBox.critical(self, "Erro", f"Erro ao atualizar inquilino: {str(e)}")
+                        raise
+
+            except Exception as e:
+                logger.exception("Error in edit_tenant:")
+                if session:
+                    session.rollback()
+                QMessageBox.critical(self, "Erro", f"Erro ao processar edição do inquilino: {str(e)}")
+            finally:
+                if session:
+                    session.close()
+                    logger.debug("Database session closed")
 
         except Exception as e:
-            if session:
-                session.rollback()
-            QMessageBox.critical(self, "Erro", f"Erro ao atualizar inquilino: {str(e)}")
-        finally:
-            if session:
-                session.close()
+            logger.exception("Unexpected error in edit_tenant:")
+            QMessageBox.critical(
+                self, 
+                "Erro", 
+                f"Ocorreu um erro inesperado ao editar o inquilino.\n\nDetalhes: {str(e)}"
+            )
 
     def delete_tenant(self):
         """Soft delete the selected tenant"""
@@ -691,7 +1092,10 @@ class MainWindow(QMainWindow):
 
                 # Add tenant data to each column
                 name_item = QTableWidgetItem(tenant.name)
-                room_item = QTableWidgetItem(tenant.room)
+                # Get room name from the relationship
+                room_name = tenant.room_ref.name if tenant.room_ref else ""
+                room_item = QTableWidgetItem(room_name)
+                room_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
                 # Style deleted tenants with strikethrough and red color
                 is_deleted = not getattr(tenant, "is_active", True)
@@ -835,7 +1239,9 @@ class MainWindow(QMainWindow):
 
             # Add data to table
             self.payments_table.setItem(row, 0, QTableWidgetItem(tenant.name))
-            self.payments_table.setItem(row, 1, QTableWidgetItem(tenant.room))
+            # Get room name from the relationship
+            room_name = tenant.room_ref.name if tenant.room_ref else ""
+            self.payments_table.setItem(row, 1, QTableWidgetItem(room_name))
             self.payments_table.setItem(
                 row, 2, QTableWidgetItem(f"{tenant.rent:.2f} €")
             )
