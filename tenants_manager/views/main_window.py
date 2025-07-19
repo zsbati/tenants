@@ -819,7 +819,12 @@ class MainWindow(QMainWindow):
                             tenant.name = tenant_data['name']
                         if 'room_id' in tenant_data and tenant_data['room_id'] is not None:
                             tenant.room_id = tenant_data['room_id']
-                        if 'rent' in tenant_data and tenant_data['rent'] is not None:
+                        if 'rent' in tenant_data and tenant_data['rent'] is not None and tenant.rent != tenant_data['rent']:
+                            # Use the update_rent method to properly handle rent changes and history
+                            if not tenant.update_rent(tenant_data['rent'], changed_by="System"):
+                                logger.error(f"Failed to update rent for tenant {tenant.id}")
+                                QMessageBox.warning(self, "Aviso", "Ocorreu um erro ao atualizar a renda. O histórico pode não ter sido atualizado corretamente.")
+                            # Still update the rent value in case the history update failed but the rent changed
                             tenant.rent = tenant_data['rent']
                         if 'bi' in tenant_data and tenant_data['bi'] is not None:
                             tenant.bi = tenant_data['bi']
