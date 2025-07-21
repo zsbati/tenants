@@ -710,32 +710,52 @@ class MainWindow(QMainWindow):
     def add_tenant(self):
         dialog = TenantDialog(parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            tenant = dialog.get_tenant_data()
-            if tenant:
+            tenant_data = dialog.get_tenant_data()
+            if tenant_data:
+                session = self.db_manager.get_session()
                 try:
-                    # Get the session
-                    session = self.db_manager.get_session()
-
-                    # Add the tenant to the session
+                    # Import models here to avoid circular imports
+                    from tenants_manager.models.tenant import Tenant, EmergencyContact
+                    
+                    # Create Tenant instance
+                    tenant = Tenant(
+                        name=tenant_data['name'],
+                        room_id=tenant_data['room_id'],
+                        bi=tenant_data['bi'],
+                        email=tenant_data['email'],
+                        phone=tenant_data['phone'],
+                        rent=tenant_data['rent'],
+                        address=tenant_data['address'],
+                        birth_date=tenant_data['birth_date'],
+                        entry_date=tenant_data['entry_date']
+                    )
+                    
+                    # Add tenant to session first to get an ID
                     session.add(tenant)
-
-                    # If there's an emergency contact, add it to the session
-                    if (
-                        hasattr(tenant, "emergency_contact")
-                        and tenant.emergency_contact
-                    ):
-                        session.add(tenant.emergency_contact)
-
+                    session.flush()  # This assigns an ID to the tenant
+                    
+                    # Handle emergency contact if provided
+                    if tenant_data.get('emergency_contact'):
+                        ec_data = tenant_data['emergency_contact']
+                        if any(ec_data.values()):  # Only create if at least one field is filled
+                            emergency_contact = EmergencyContact(
+                                name=ec_data.get('name'),
+                                phone=ec_data.get('phone'),
+                                email=ec_data.get('email'),
+                                tenant_id=tenant.id
+                            )
+                            session.add(emergency_contact)
+                    
                     # Commit the transaction
                     session.commit()
-
-                    # Refresh the tenant list
+                    
+                    # Refresh the UI
                     self.load_tenants()
                     self.load_payments()
                     QMessageBox.information(
                         self, "Sucesso", "Inquilino adicionado com sucesso!"
                     )
-
+                    
                 except Exception as e:
                     session.rollback()
                     if "UNIQUE constraint failed: tenants.bi" in str(e):
@@ -748,6 +768,7 @@ class MainWindow(QMainWindow):
                         QMessageBox.critical(
                             self, "Erro", f"Erro ao adicionar inquilino: {str(e)}"
                         )
+                        logger.exception("Error adding tenant:")
                 finally:
                     session.close()
 
